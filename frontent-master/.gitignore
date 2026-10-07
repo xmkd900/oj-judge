@@ -1,0 +1,45 @@
+.DS_Store
+node_modules
+/dist
+
+# Auto-generated files
+/generated
+
+# local env files
+.env.local
+.env.*.local
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+Thumbs.db
+
+# Build artifacts
+*.tsbuildinfo
+
+# Cache directories
+.cache
+.parcel-cache
+.vite
+
+# Test coverage
+coverage
+.nyc_output
+
+# Temporary files
+*.tmp
+*.temp
