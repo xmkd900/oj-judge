@@ -6,7 +6,11 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 登录用户脱敏视图（不含账号、密码）
+ * 登录用户脱敏视图（不含账号、密码）。
+ *
+ * <p>字段只保留前端真正消费的那些。
+ * 曾经还有个 updateTime，但全前端搜不到任何使用点，已删除 ——
+ * 将来要用再加回来即可：加字段永远比删字段容易。
  */
 @Data
 public class UserLoginVO implements Serializable {
@@ -39,12 +43,7 @@ public class UserLoginVO implements Serializable {
     private String userRole;
 
     /**
-     * 创建时间
+     * 创建时间（个人中心展示"注册时间"）
      */
     private LocalDateTime createTime;
-
-    /**
-     * 更新时间
-     */
-    private LocalDateTime updateTime;
 }

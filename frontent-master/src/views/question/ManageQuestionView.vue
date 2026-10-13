@@ -1,7 +1,7 @@
 <template>
   <div id="manageQuestionView">
     <a-table
-      :ref="tableRef"
+      ref="tableRef"
       :columns="columns"
       :data="dataList"
       :pagination="{
@@ -23,52 +23,37 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watchEffect } from "vue";
-import {
-  Page_Question_,
-  Question,
-  QuestionControllerService,
-} from "../../../generated";
+import { ref, watchEffect } from "vue";
+import * as questionApi from "@/api/question";
+import { Question, QuestionQueryRequest } from "@/api/question";
 import message from "@arco-design/web-vue/es/message";
-import * as querystring from "querystring";
 import { useRouter } from "vue-router";
 
 const tableRef = ref();
 
-const dataList = ref([]);
+const dataList = ref<Question[]>([]);
 const total = ref(0);
-const searchParams = ref({
+const searchParams = ref<QuestionQueryRequest>({
   pageSize: 10,
   current: 1,
 });
 
 const loadData = async () => {
-  const res = await QuestionControllerService.listQuestionByPageUsingPost(
-    searchParams.value
-  );
-  if (res.code === 0) {
-    dataList.value = res.data.records;
-    total.value = res.data.total;
-  } else {
-    message.error("加载失败，" + res.message);
+  try {
+    const data = await questionApi.listQuestionByPage(searchParams.value);
+    dataList.value = data.records;
+    total.value = data.total;
+  } catch (error: any) {
+    message.error("加载失败：" + (error?.message ?? "请稍后重试"));
   }
 };
 
 /**
- * 监听 searchParams 变量，改变时触发页面的重新加载
+ * watchEffect 会立即执行一次，无需再写 onMounted，否则首屏重复请求两次。
  */
 watchEffect(() => {
   loadData();
 });
-
-/**
- * 页面加载时，请求数据
- */
-onMounted(() => {
-  loadData();
-});
-
-// {id: "1", title: "A+ D", content: "新的题目内容", tags: "["二叉树"]", answer: "新的答案", submitNum: 0,…}
 
 const columns = [
   {
@@ -129,14 +114,15 @@ const onPageChange = (page: number) => {
 };
 
 const doDelete = async (question: Question) => {
-  const res = await QuestionControllerService.deleteQuestionUsingPost({
-    id: question.id,
-  });
-  if (res.code === 0) {
+  if (!question.id) {
+    return;
+  }
+  try {
+    await questionApi.deleteQuestion(question.id);
     message.success("删除成功");
     loadData();
-  } else {
-    message.error("删除失败");
+  } catch (error: any) {
+    message.error("删除失败：" + (error?.message ?? "请稍后重试"));
   }
 };
 

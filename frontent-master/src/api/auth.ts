@@ -1,4 +1,4 @@
-import request from "@/api/request";
+import request, { BaseResponse, unwrap } from "@/api/request";
 import { clearAccessToken, setAccessToken } from "@/utils/token";
 
 /**
@@ -8,11 +8,7 @@ import { clearAccessToken, setAccessToken } from "@/utils/token";
  * （Session + 网关 8101）生成的，登录响应结构已经对不上了。等后端稳定后重新生成即可。
  */
 
-export interface BaseResponse<T> {
-  code: number;
-  data: T;
-  message: string;
-}
+export type { BaseResponse };
 
 export interface LoginUserVO {
   id?: number;
@@ -52,14 +48,6 @@ export interface UserUpdateMyRequest {
   userName?: string;
   userAvatar?: string;
   userProfile?: string;
-}
-
-/** 解包统一响应体，非 0 直接抛错 */
-function unwrap<T>(body: BaseResponse<T>): T {
-  if (!body || body.code !== 0) {
-    throw new Error(body?.message ?? "请求失败");
-  }
-  return body.data;
 }
 
 /**

@@ -16,6 +16,26 @@ import {
  */
 export const BASE_URL = "http://localhost:8121";
 
+/**
+ * 后端统一响应体。判断成功的唯一标准是 code === 0，不要看 HTTP 状态码
+ * （认证失败时后端会返回 401/403，但响应体结构不变）。
+ */
+export interface BaseResponse<T> {
+  code: number;
+  data: T;
+  message: string;
+}
+
+/**
+ * 解包响应体：非 0 直接抛错，调用方只管 try/catch，不用层层判断 code。
+ */
+export function unwrap<T>(body: BaseResponse<T>): T {
+  if (!body || body.code !== 0) {
+    throw new Error(body?.message ?? "请求失败");
+  }
+  return body.data;
+}
+
 const request = axios.create({
   baseURL: BASE_URL,
   timeout: 30000,

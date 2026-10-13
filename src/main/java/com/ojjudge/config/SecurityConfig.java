@@ -11,6 +11,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -32,6 +33,13 @@ import java.util.List;
  */
 @Configuration
 @RequiredArgsConstructor
+/**
+ * 开启方法级安全，允许在 Controller 方法上写 {@code @PreAuthorize("hasAuthority('ROLE_admin')")}。
+ *
+ * <p>这样做而不是在 SecurityConfig 里堆 URL 的原因：权限声明跟着<strong>方法</strong>走，
+ * 而方法比 URL 稳定得多 —— 改了 URL 不会让权限静默失效。
+ */
+@EnableMethodSecurity
 public class SecurityConfig {
 
     /**
@@ -40,7 +48,17 @@ public class SecurityConfig {
     private static final String[] PUBLIC_POST_URLS = {
             "/api/user/register",
             "/api/user/login",
-            "/api/user/refresh"
+            "/api/user/refresh",
+            // 游客也能浏览题目列表
+            "/api/question/list/page/vo"
+    };
+
+    /**
+     * 无需登录的 GET 接口：题目详情（脱敏）、标签列表
+     */
+    private static final String[] PUBLIC_GET_URLS = {
+            "/api/question/get/vo",
+            "/api/question/tags"
     };
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -98,6 +116,7 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, PUBLIC_POST_URLS).permitAll()
+                        .requestMatchers(HttpMethod.GET, PUBLIC_GET_URLS).permitAll()
                         // 预检请求直接放行，否则带 Authorization 头的跨域请求会被拦
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated());

@@ -12,6 +12,7 @@ import ManageQuestionView from "@/views/question/ManageQuestionView.vue";
 import QuestionsView from "@/views/question/QuestionsView.vue";
 import QuestionSubmitView from "@/views/question/QuestionSubmitView.vue";
 import ViewQuestionView from "@/views/question/ViewQuestionView.vue";
+import UserManageView from "@/views/admin/UserManageView.vue";
 
 export const routes: Array<RouteRecordRaw> = [
   {
@@ -47,6 +48,15 @@ export const routes: Array<RouteRecordRaw> = [
       // 需要登录才能访问，但入口在右上角下拉菜单里，不进顶部导航
       access: ACCESS_ENUM.USER,
       hideInMenu: true,
+    },
+  },
+  {
+    path: "/admin/user",
+    name: "用户管理",
+    component: UserManageView,
+    meta: {
+      // 只有管理员能进，非管理员会看到"无权限"页
+      access: ACCESS_ENUM.ADMIN,
     },
   },
   {

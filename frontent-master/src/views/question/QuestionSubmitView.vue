@@ -22,7 +22,7 @@
     </a-form>
     <a-divider size="0" />
     <a-table
-      :ref="tableRef"
+      ref="tableRef"
       :columns="columns"
       :data="dataList"
       :pagination="{
@@ -37,26 +37,27 @@
         {{ JSON.stringify(record.judgeInfo) }}
       </template>
       <template #createTime="{ record }">
-        {{ moment(record.createTime).format("YYYY-MM-DD") }}
+        {{ formatDate(record.createTime) }}
       </template>
     </a-table>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watchEffect } from "vue";
+import { ref, watchEffect } from "vue";
+import * as questionApi from "@/api/question";
 import {
-  Question,
-  QuestionControllerService,
   QuestionSubmitQueryRequest,
-} from "../../../generated";
+  QuestionSubmitVO,
+  QuestionVO,
+} from "@/api/question";
+import { formatDate } from "@/utils/date";
 import message from "@arco-design/web-vue/es/message";
 import { useRouter } from "vue-router";
-import moment from "moment";
 
 const tableRef = ref();
 
-const dataList = ref([]);
+const dataList = ref<QuestionSubmitVO[]>([]);
 const total = ref(0);
 const searchParams = ref<QuestionSubmitQueryRequest>({
   questionId: undefined,
@@ -66,32 +67,23 @@ const searchParams = ref<QuestionSubmitQueryRequest>({
 });
 
 const loadData = async () => {
-  const res = await QuestionControllerService.listQuestionSubmitByPageUsingPost(
-    {
+  try {
+    const data = await questionApi.listQuestionSubmitByPage({
       ...searchParams.value,
       sortField: "createTime",
       sortOrder: "descend",
-    }
-  );
-  if (res.code === 0) {
-    dataList.value = res.data.records;
-    total.value = res.data.total;
-  } else {
-    message.error("加载失败，" + res.message);
+    });
+    dataList.value = data.records;
+    total.value = data.total;
+  } catch (error: any) {
+    message.error("加载失败：" + (error?.message ?? "请稍后重试"));
   }
 };
 
 /**
- * 监听 searchParams 变量，改变时触发页面的重新加载
+ * watchEffect 会立即执行一次，无需再写 onMounted，否则首屏重复请求两次。
  */
 watchEffect(() => {
-  loadData();
-});
-
-/**
- * 页面加载时，请求数据
- */
-onMounted(() => {
   loadData();
 });
 
@@ -139,7 +131,7 @@ const router = useRouter();
  * 跳转到做题页面
  * @param question
  */
-const toQuestionPage = (question: Question) => {
+const toQuestionPage = (question: QuestionVO) => {
   router.push({
     path: `/view/question/${question.id}`,
   });

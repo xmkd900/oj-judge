@@ -1,10 +1,17 @@
 package com.ojjudge.service.Impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
+import com.ojjudge.common.CommonConstant;
 import com.ojjudge.common.ErrorCode;
+import com.ojjudge.common.SortUtils;
 import com.ojjudge.common.UserConstant;
+import com.ojjudge.dto.UserAddDTO;
 import com.ojjudge.dto.UserLoginDTO;
+import com.ojjudge.dto.UserQueryDTO;
 import com.ojjudge.dto.UserRegisterDTO;
+import com.ojjudge.dto.UserUpdateDTO;
 import com.ojjudge.dto.UserUpdateMyDTO;
 import com.ojjudge.entity.User;
 import com.ojjudge.exception.BusinessException;
@@ -17,9 +24,12 @@ import com.ojjudge.security.SecurityUtils;
 import com.ojjudge.security.TokenPair;
 import com.ojjudge.service.UserService;
 import com.ojjudge.vo.UserLoginVO;
+import com.ojjudge.vo.UserVO;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -31,6 +41,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -223,7 +234,212 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         vo.setUserProfile(user.getUserProfile());
         vo.setUserRole(user.getUserRole());
         vo.setCreateTime(user.getCreateTime());
+        return vo;
+    }
+
+    private UserVO toUserVO(User user) {
+        UserVO vo = new UserVO();
+        vo.setId(user.getId());
+        vo.setUserAccount(user.getUserAccount());
+        vo.setUserName(user.getUserName());
+        vo.setUserAvatar(user.getUserAvatar());
+        vo.setUserProfile(user.getUserProfile());
+        vo.setUserRole(user.getUserRole());
+        vo.setCreateTime(user.getCreateTime());
         vo.setUpdateTime(user.getUpdateTime());
         return vo;
+    }
+
+    // ==================================================================== 管理员功能
+    //
+    // 入口权限由 Controller 上的 @PreAuthorize 保证，这里只负责业务规则与三条红线。
+
+    @Override
+    public Page<UserVO> listUserByPage(UserQueryDTO userQueryDTO) {
+        Page<User> page = new Page<>(userQueryDTO.getCurrent(), userQueryDTO.getPageSize());
+        SortUtils.apply(page, userQueryDTO.getSortField(), userQueryDTO.getSortOrder(),
+                CommonConstant.USER_SORT_FIELDS, "createTime");
+
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(userQueryDTO.getId() != null, User::getId, userQueryDTO.getId())
+                .like(StringUtils.hasText(userQueryDTO.getUserName()), User::getUserName, userQueryDTO.getUserName())
+                .eq(StringUtils.hasText(userQueryDTO.getUserRole()), User::getUserRole, userQueryDTO.getUserRole());
+
+        Page<User> result = this.page(page, wrapper);
+        Page<UserVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
+        voPage.setRecords(result.getRecords().stream().map(this::toUserVO).toList());
+        return voPage;
+    }
+
+    @Override
+    public UserVO getUserById(Long id) {
+        User user = this.getById(id);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        }
+        return toUserVO(user);
+    }
+
+    @Override
+    public Long addUser(UserAddDTO userAddDTO) {
+        String account = userAddDTO.getUserAccount().trim();
+        Long count = this.lambdaQuery().eq(User::getUserAccount, account).count();
+        if (count != null && count > 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "该账号已被注册");
+        }
+
+        String role = normalizeRole(userAddDTO.getUserRole(), UserConstant.DEFAULT_ROLE);
+
+        User user = new User();
+        user.setUserAccount(account);
+        // 初始密码由服务端生成，不是管理员指定的
+        user.setUserPassword(passwordEncoder.encode(randomInitPassword()));
+        user.setUserName(StringUtils.hasText(userAddDTO.getUserName())
+                ? userAddDTO.getUserName() : account);
+        user.setUserAvatar(userAddDTO.getUserAvatar());
+        user.setUserProfile(userAddDTO.getUserProfile());
+        user.setUserRole(role);
+        user.setCreateTime(LocalDateTime.now());
+        user.setUpdateTime(LocalDateTime.now());
+        this.save(user);
+        return user.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateUser(UserUpdateDTO userUpdateDTO) {
+        Long targetId = userUpdateDTO.getId();
+        User user = this.getById(targetId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        }
+
+        Long currentId = SecurityUtils.currentUserId();
+
+        // 红线一：不能改自己的角色。否则手滑把自己降成普通用户，后台就再也进不去了
+        if (userUpdateDTO.getUserRole() != null && targetId.equals(currentId)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "不能修改自己的角色");
+        }
+
+        // 红线二：角色值白名单，客户端传什么都不能照单全收
+        String newRole = normalizeRole(userUpdateDTO.getUserRole(), user.getUserRole());
+        boolean roleChanged = userUpdateDTO.getUserRole() != null;
+
+        if (roleChanged) {
+            // 红线三：不能把最后一个管理员降权
+            if (!UserConstant.ROLE_ADMIN.equals(newRole)
+                    && UserConstant.ROLE_ADMIN.equals(user.getUserRole())
+                    && countAdmin() <= 1) {
+                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "至少要保留一个管理员");
+            }
+        }
+
+        // 部分更新：与 updateMy / 题目编辑统一约定 —— null = 不修改
+        boolean dirty = false;
+        if (userUpdateDTO.getUserName() != null) {
+            user.setUserName(userUpdateDTO.getUserName());
+            dirty = true;
+        }
+        if (userUpdateDTO.getUserAvatar() != null) {
+            user.setUserAvatar(userUpdateDTO.getUserAvatar());
+            dirty = true;
+        }
+        if (userUpdateDTO.getUserProfile() != null) {
+            user.setUserProfile(userUpdateDTO.getUserProfile());
+            dirty = true;
+        }
+        if (roleChanged) {
+            user.setUserRole(newRole);
+            dirty = true;
+        }
+        if (!dirty) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "没有需要更新的字段");
+        }
+
+        user.setUpdateTime(LocalDateTime.now());
+        return this.updateById(user);
+    }
+
+    @Override
+    public boolean deleteUser(Long id) {
+        User user = this.getById(id);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        }
+        if (id.equals(SecurityUtils.currentUserId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "不能删除自己");
+        }
+        if (UserConstant.ROLE_ADMIN.equals(user.getUserRole()) && countAdmin() <= 1) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "至少要保留一个管理员");
+        }
+        return this.removeById(id);
+    }
+
+    @Override
+    public boolean banUser(Long id) {
+        User user = this.getById(id);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        }
+        if (id.equals(SecurityUtils.currentUserId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "不能封禁自己");
+        }
+        if (UserConstant.ROLE_ADMIN.equals(user.getUserRole()) && countAdmin() <= 1) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "至少要保留一个管理员");
+        }
+        user.setUserRole(UserConstant.ROLE_BAN);
+        user.setUpdateTime(LocalDateTime.now());
+        return this.updateById(user);
+    }
+
+    @Override
+    public boolean unbanUser(Long id) {
+        User user = this.getById(id);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        }
+        if (!UserConstant.ROLE_BAN.equals(user.getUserRole())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "该用户未被封禁");
+        }
+        user.setUserRole(UserConstant.ROLE_USER);
+        user.setUpdateTime(LocalDateTime.now());
+        return this.updateById(user);
+    }
+
+    // ------------------------------------------------------------ 管理员工具
+
+    /**
+     * 角色白名单校验：只允许 user / admin / ban，其余一律退回默认值。
+     *
+     * <p>别小看这一步 —— 不校验的话客户端传个 "superadmin" 进来，
+     * 而我们所有权限判断都是 {@code equals("admin")}，那这个账号反而会变成<strong>零权限</strong>，
+     * 或者将来加了别的判断逻辑时出现非预期行为。
+     */
+    private String normalizeRole(String role, String fallback) {
+        if (!StringUtils.hasText(role)) {
+            return fallback;
+        }
+        String trimmed = role.trim();
+        if (UserConstant.ROLE_USER.equals(trimmed)
+                || UserConstant.ROLE_ADMIN.equals(trimmed)
+                || UserConstant.ROLE_BAN.equals(trimmed)) {
+            return trimmed;
+        }
+        throw new BusinessException(ErrorCode.PARAMS_ERROR, "角色只能是 user / admin / ban");
+    }
+
+    private long countAdmin() {
+        Long count = this.lambdaQuery().eq(User::getUserRole, UserConstant.ROLE_ADMIN).count();
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * 管理员建号时的随机初始密码。
+     *
+     * <p>真实项目这里应该把密码通过安全渠道告知用户，并强制首次登录修改。
+     * 当前只是生成一个足够随机的串，避免管理员设一个"他和用户都知道"的弱密码。
+     */
+    private String randomInitPassword() {
+        return "Init@" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     }
 }

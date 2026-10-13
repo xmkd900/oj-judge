@@ -86,4 +86,11 @@ public class LoginUserDetails implements UserDetails {
     public boolean isEnabled() {
         return !UserConstant.ROLE_BAN.equals(role);
     }
+
+    /**
+     * 是否管理员
+     */
+    public boolean isAdmin() {
+        return UserConstant.ROLE_ADMIN.equals(role);
+    }
 }
