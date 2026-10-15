@@ -18,6 +18,7 @@ import com.ojjudge.dto.QuestionSubmitQueryDTO;
 import com.ojjudge.dto.QuestionUpdateDTO;
 import com.ojjudge.dto.SampleCase;
 import com.ojjudge.entity.Question;
+import com.ojjudge.judge.event.SubmitCreatedEvent;
 import com.ojjudge.entity.QuestionSubmit;
 import com.ojjudge.exception.BusinessException;
 import com.ojjudge.mapper.QuesionMapper;
@@ -53,6 +54,8 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
     private final QuestionTagService questionTagService;
 
     private final JsonUtils jsonUtils;
+
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     // ------------------------------------------------------------ 查询（脱敏）
 
@@ -178,6 +181,14 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
 
     // ------------------------------------------------------------- 提交与判题
 
+    /**
+     * 提交代码。判题是异步的，这里只落库（status=等待中）并派发事件。
+     *
+     * <p>⚠️ 这里的 {@code @Transactional} <b>不能删</b>。
+     * 判题事件用的是 AFTER_COMMIT 语义，没有事务的话监听器根本不会触发，
+     * 提交记录就会永远停在"等待中"。
+     * 而监听器在提交之后才跑，所以也不会读到未提交的数据 —— 两个要求同时满足。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long doQuestionSubmit(QuestionSubmitAddDTO submitAddDTO) {
@@ -205,6 +216,9 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
                 .setSql("submit_num = submit_num + 1")
                 .update();
 
+        // 关键：这里不直接调用判题服务。
+        // 判题要在事务提交之后跑，否则异步线程读不到刚插入的这条记录。
+        eventPublisher.publishEvent(new SubmitCreatedEvent(submit.getId()));
         return submit.getId();
     }
 

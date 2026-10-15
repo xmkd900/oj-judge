@@ -56,6 +56,30 @@ watch(
   }
 );
 
+/**
+ * 外部 value 变化时同步进编辑器。
+ *
+ * <p>为什么必须监听：monaco 只在 create 时用 props.value 初始化一次，
+ * 之后外部改值编辑器是不知道的。切换编程语言要换代码模板时，
+ * 就会一直停在旧语言的代码上。
+ *
+ * <p>⚠️ 一定要先比较再 setValue，否则会死循环：
+ * setValue 触发 onDidChangeModelContent → handleChange 通知父组件 →
+ * props.value 变化 → 又 setValue ...
+ */
+watch(
+  () => props.value,
+  (newValue) => {
+    if (!codeEditor.value) {
+      return;
+    }
+    const editor = toRaw(codeEditor.value);
+    if (editor.getValue() !== (newValue ?? "")) {
+      editor.setValue(newValue ?? "");
+    }
+  }
+);
+
 onMounted(() => {
   if (!codeEditorRef.value) {
     return;

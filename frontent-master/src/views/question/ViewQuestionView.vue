@@ -90,14 +90,18 @@
               v-model="form.language"
               :style="{ width: '320px' }"
               placeholder="选择编程语言"
+              @change="onLanguageChange"
             >
               <a-option>java</a-option>
               <a-option>cpp</a-option>
               <a-option>go</a-option>
-              <a-option>html</a-option>
             </a-select>
           </a-form-item>
         </a-form>
+        <!-- 语言约定提示：最常见的编译错误就是入口类名不对 -->
+        <a-alert v-if="languageTip" type="normal" style="margin-bottom: 8px">
+          {{ languageTip }}
+        </a-alert>
         <CodeEditor
           :value="form.code as string"
           :language="form.language"
@@ -107,6 +111,20 @@
         <a-button type="primary" style="min-width: 200px" @click="doSubmit">
           提交代码
         </a-button>
+        <!-- 提交后直接把结论显示在这里，不用来回切页面 -->
+        <div v-if="lastResult" style="margin-top: 16px">
+          <a-alert :type="lastResult.ok ? 'success' : 'error'">
+            {{ lastResult.message }}
+            <span v-if="lastResult.time != null">
+              · 耗时 {{ lastResult.time }} ms
+            </span>
+          </a-alert>
+          <a-collapse v-if="lastResult.errorMessage" style="margin-top: 8px">
+            <a-collapse-item header="查看详细错误信息" :key="'err'">
+              <pre class="error-detail">{{ lastResult.errorMessage }}</pre>
+            </a-collapse-item>
+          </a-collapse>
+        </div>
       </a-col>
     </a-row>
   </div>
@@ -122,6 +140,8 @@ import {
   QuestionSubmitAddRequest,
   QuestionVO,
   SampleCase,
+  getCodeTemplate,
+  LANGUAGE_TIPS,
 } from "@/api/question";
 import { formatMemory, formatTime } from "@/utils/format";
 
@@ -187,27 +207,96 @@ const onTabChange = (key: string | number) => {
 
 const form = ref<QuestionSubmitAddRequest>({
   language: "java",
-  code: "",
+  // 进来就给一份能直接跑的模板。
+  // 空编辑器最容易导致的问题：用户从别处复制 class Solution 过来，
+  // 文件名对不上，javac 直接编译错误，而用户看不到具体报错会一头雾水。
+  code: getCodeTemplate("java"),
 });
+
+/** 当前语言的编码约定提示 */
+const languageTip = computed(() => LANGUAGE_TIPS[form.value.language ?? ""] ?? "");
+
+/**
+ * 切换语言时，如果编辑器里还是原来的模板（即用户没写过东西），
+ * 就换成新语言的模板；已经写了代码就别覆盖，否则会把用户的劳动成果冲掉。
+ */
+// 放在 onLanguageChange 之前声明：const/let 有暂时性死区，
+// 虽然在函数里引用是安全的（调用时才求值），但顺序写对更不容易踩坑
+let previousLanguage = "java";
+
+const onLanguageChange = (language: string) => {
+  const current = form.value.code?.trim() ?? "";
+  const isUntouched =
+    current === "" || current === getCodeTemplate(previousLanguage).trim();
+  if (isUntouched) {
+    form.value.code = getCodeTemplate(language);
+  } else {
+    // 必须告诉用户为什么没变，否则他会以为切换功能坏了
+    message.info("检测到你已修改代码，已保留原内容，未切换模板");
+  }
+  previousLanguage = language;
+};
 
 /**
  * 提交代码。
  * 注意：判题是异步的，这里返回成功只代表"提交记录已创建"，
  * 结果要去提交记录页看，或轮询 question_submit/list/page。
  */
+/** 最近一次提交的结果，显示在编辑器下方 */
+const lastResult = ref<{
+  ok: boolean;
+  message: string;
+  time?: number | null;
+  errorMessage?: string;
+}>();
+let watchingSubmitId: number | undefined;
+
+/**
+ * 提交代码。
+ *
+ * <p>提交接口只返回 submitId（判题是异步的），所以这里要轮询拿结果。
+ * 轮询到 status >= 2（成功/失败）就把结论显示出来 ——
+ * 尤其是编译错误，必须把 javac 的原始报错给用户看，
+ * 否则他只知道"编译错误"，不知道是类名不对还是少了分号。
+ */
 const doSubmit = async () => {
   if (!question.value?.id) {
     return;
   }
+  lastResult.value = undefined;
   try {
-    await questionApi.doQuestionSubmit({
+    const submitId = await questionApi.doQuestionSubmit({
       ...form.value,
       questionId: question.value.id,
     });
-    message.success("提交成功，请到提交记录页查看判题结果");
+    message.success("提交成功，正在判题…");
+    watchingSubmitId = submitId;
+    await pollResult(submitId);
   } catch (error: any) {
     message.error("提交失败：" + (error?.message ?? "请稍后重试"));
   }
+};
+
+const pollResult = async (submitId: number) => {
+  for (let i = 0; i < 60; i++) {
+    const page = await questionApi.listQuestionSubmitByPage({
+      current: 1,
+      pageSize: 10,
+      id: submitId,
+    });
+    const rec = page.records?.find((r) => r.id === submitId);
+    if (rec && (rec.status ?? 0) >= 2) {
+      lastResult.value = {
+        ok: rec.judgeInfo?.message === "Accepted",
+        message: rec.judgeInfo?.message ?? "未知",
+        time: rec.judgeInfo?.time,
+        errorMessage: rec.judgeInfo?.errorMessage,
+      };
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  lastResult.value = { ok: false, message: "判题超时，请到提交记录页查看" };
 };
 
 /**
@@ -266,6 +355,20 @@ const changeCode = (value: string) => {
   margin-bottom: 6px;
   font-size: 13px;
   color: var(--color-text-3, #86909c);
+}
+
+.error-detail {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--color-fill-2, #f7f8fa);
+  border-radius: 4px;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .sample-code {

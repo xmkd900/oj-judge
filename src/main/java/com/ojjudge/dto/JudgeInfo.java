@@ -27,4 +27,14 @@ public class JudgeInfo implements Serializable {
      * 内存占用。判题沙箱尚未接入，恒为 null
      */
     private Long memory;
+
+    /**
+     * 编译 / 运行时的错误输出（stderr），只在失败时才有值。
+     *
+     * <p>为什么必须有这个字段：只告诉用户"编译错误"等于什么都没说。
+     * 最常见的失败原因是<strong>类名不是 Main</strong>（比如从 LeetCode 复制来的
+     * {@code class Solution}），而 javac 的报错信息里写得很清楚。
+     * 不把这个透传出去，用户根本没法自查。
+     */
+    private String errorMessage;
 }

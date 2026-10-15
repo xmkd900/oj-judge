@@ -288,3 +288,67 @@ export async function listQuestionSubmitByPage(
 export function isAccepted(judgeInfo?: JudgeInfo): boolean {
   return judgeInfo?.message === "Accepted";
 }
+
+/**
+ * 各语言的初始代码模板。
+ *
+ * 为什么必须有这个：判题沙箱把源码写成固定文件名再编译，
+ *   Java  -> Main.java，所以 public 类名必须是 **Main**
+ *   C++   -> main.cpp，入口是 main()
+ *   Go    -> main.go，必须是 package main + func main()
+ *
+ * 编辑器如果一开始是空的，用户很容易从 LeetCode 之类的地方复制
+ * `class Solution` 过来 —— 文件名对不上，javac 直接报编译错误，
+ * 而用户只看到"编译错误"四个字，完全不知道是类名问题。
+ * 给一份能直接跑的模板，从源头避免这类低级失败。
+ */
+export const CODE_TEMPLATES: Record<string, string> = {
+  // 模板里用 Scanner 只是因为它是最好懂的写法，不是要求。
+  // 想用 BufferedReader / 快读模板 / 任何方式都行，能读标准输入即可。
+  java: `// 入口类必须是 Main，且不能有 package 声明
+import java.util.Scanner;
+
+public class Main {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        // 在这里写你的代码
+    }
+}
+`,
+  cpp: `// 入口是 main()
+#include <iostream>
+using namespace std;
+
+int main() {
+    // 在这里写你的代码
+    return 0;
+}
+`,
+  go: `// 必须是 package main 且包含 func main()
+package main
+
+import "fmt"
+
+func main() {
+    // 在这里写你的代码
+}
+`,
+};
+
+/**
+ * 各语言的**硬性约束**，显示在编辑器上方。
+ *
+ * <p>只写"必须怎样"，不写"建议用什么读输入" ——
+ * 判题只要求程序从标准输入读数据、向标准输出写答案，
+ * 用 Scanner 还是 BufferedReader 还是手写快读，是答题人的自由。
+ */
+export const LANGUAGE_TIPS: Record<string, string> = {
+  java: "入口类必须是 Main，不能有 package 声明。从标准输入读、向标准输出写即可，读写方式不限。",
+  cpp: "入口是 main()。从标准输入读、向标准输出写即可，读写方式不限。",
+  go: "必须是 package main 且包含 func main()。从标准输入读、向标准输出写即可，读写方式不限。",
+};
+
+/** 取某语言的初始模板；未知语言返回空串 */
+export function getCodeTemplate(language?: string): string {
+  return language ? (CODE_TEMPLATES[language] ?? "") : "";
+}

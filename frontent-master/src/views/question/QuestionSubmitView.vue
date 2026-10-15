@@ -34,7 +34,24 @@
       @page-change="onPageChange"
     >
       <template #judgeInfo="{ record }">
-        {{ JSON.stringify(record.judgeInfo) }}
+        <a-space direction="vertical" size="mini">
+          <a-tag :color="statusColor(record.judgeInfo?.message)">
+            {{ record.judgeInfo?.message ?? "等待中" }}
+          </a-tag>
+          <span v-if="record.judgeInfo?.time != null" class="judge-meta">
+            耗时 {{ formatTime(record.judgeInfo.time) }}
+          </span>
+          <!-- 失败时把原始报错展开给用户看。只给"编译错误"四个字等于没说 -->
+          <a-popover
+            v-if="record.judgeInfo?.errorMessage"
+            :content-style="{ maxWidth: '480px' }"
+          >
+            <a-link size="mini">查看错误详情</a-link>
+            <template #content>
+              <pre class="error-detail">{{ record.judgeInfo.errorMessage }}</pre>
+            </template>
+          </a-popover>
+        </a-space>
       </template>
       <template #createTime="{ record }">
         {{ formatDate(record.createTime) }}
@@ -44,7 +61,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watchEffect } from "vue";
+import { onUnmounted, ref, watchEffect } from "vue";
 import * as questionApi from "@/api/question";
 import {
   QuestionSubmitQueryRequest,
@@ -52,6 +69,7 @@ import {
   QuestionVO,
 } from "@/api/question";
 import { formatDate } from "@/utils/date";
+import { formatTime } from "@/utils/format";
 import message from "@arco-design/web-vue/es/message";
 import { useRouter } from "vue-router";
 
@@ -75,6 +93,7 @@ const loadData = async () => {
     });
     dataList.value = data.records;
     total.value = data.total;
+    startPollingIfNeeded();
   } catch (error: any) {
     message.error("加载失败：" + (error?.message ?? "请稍后重试"));
   }
@@ -86,6 +105,60 @@ const loadData = async () => {
 watchEffect(() => {
   loadData();
 });
+
+/**
+ * 结论对应的标签颜色。
+ *
+ * ⚠️ 只认 "Accepted" 才是通过 —— judgeInfo.message 是中英文混杂的，
+ * 别按英文枚举去匹配，其余一律视为未通过。
+ */
+const statusColor = (message?: string) => {
+  if (message === "Accepted") return "green";
+  if (!message) return "gray";
+  return "red";
+};
+
+/** 还没出结果：等待中 / 判题中 */
+const isPending = (record: QuestionSubmitVO) =>
+  record.status === 0 || record.status === 1;
+
+/**
+ * 有提交还在排队时自动刷新。
+ *
+ * 为什么用轮询而不是 WebSocket：判题耗时几秒到几十秒，量级上轮询完全够用，
+ * 引入长连接反而要处理重连、鉴权、多实例广播一堆事。等真有实时通知需求再换。
+ */
+const POLL_INTERVAL_MS = 2000;
+let pollTimer: number | undefined;
+
+const startPollingIfNeeded = () => {
+  if (pollTimer !== undefined) return;
+  const hasPending = dataList.value.some(isPending);
+  if (!hasPending) return;
+  pollTimer = window.setInterval(async () => {
+    await loadData();
+    // 全部出结果就停，避免离开页面后还在后台刷
+    if (!dataList.value.some(isPending)) {
+      stopPolling();
+    }
+  }, POLL_INTERVAL_MS);
+};
+
+const stopPolling = () => {
+  if (pollTimer !== undefined) {
+    window.clearInterval(pollTimer);
+    pollTimer = undefined;
+  }
+};
+
+/**
+ * ⚠️ 这行必须放在 stopPolling 声明<b>之后</b>。
+ *
+ * const 声明存在暂时性死区（TDZ）：在声明之前访问会抛
+ * ReferenceError，导致整个 <script setup> 初始化中断、组件渲染不出来
+ * （现象就是页面一片空白）。之前误把它写在文件上方，提交记录页直接白屏。
+ */
+onUnmounted(stopPolling);
 
 const columns = [
   {
@@ -153,5 +226,24 @@ const doSubmit = () => {
 #questionSubmitView {
   max-width: 1280px;
   margin: 0 auto;
+}
+
+.judge-meta {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+}
+
+.error-detail {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--color-fill-2, #f7f8fa);
+  border-radius: 4px;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

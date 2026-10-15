@@ -40,10 +40,10 @@ mybatis-plus:
 jwt:
   # HMAC 密钥，长度必须 >= 32 字节（256 bit）。生产环境务必替换并通过环境变量注入
   secret: oj-judge-access-and-refresh-token-signing-secret-key-please-change-me
-  # Access Token 有效期（毫秒）：15 分钟
-  access-expiration: 10000
-  # Refresh Token 有效期（毫秒）：14 天
-  refresh-expiration: 30000
+  # Access Token 有效期（毫秒）：15 分钟 = 15 * 60 * 1000
+  access-expiration: 900000
+  # Refresh Token 有效期（毫秒）：14 天 = 14 * 24 * 60 * 60 * 1000
+  refresh-expiration: 1209600000
   # Refresh Token 下发的 Cookie 名称
   refresh-cookie-name: refresh_token
   # Cookie 的 Path，必须能覆盖 /api/user/refresh、/api/user/logout
@@ -53,9 +53,27 @@ jwt:
 
 # ===== CORS 白名单（前端 dev server） =====
 cors:
-  allowed-origins:
-    http://localhost:8080
+  # ⚠️ 这里必须包含前端实际运行的端口，否则浏览器 CORS 预检会被拒，
+  #    表现是「所有接口都失败、页面一片空白」且控制台只有 CORS 报错，极难定位。
+  # 注意：@Value 注入 List<String> 只认**逗号分隔字符串**，
+  # 写成 YAML 列表（- xxx）会导致启动时 Could not resolve placeholder
+  allowed-origins: http://localhost:8080,http://localhost:8081,http://localhost:5173
 
 logging:
   level:
     com.ojjudge: info
+
+judge:
+  sandbox:
+    # 宿主机侧在题目时限之外额外给的宽限（毫秒）。
+    # 容器启动、镜像拉取都要时间，卡死在时限上会误判成超时。
+    timeout-buffer-ms: 5000
+    # 单用例硬超时上限（毫秒），防止题目配了荒谬时限长期占住判题线程
+    max-time-per-case-ms: 10000
+    # 容器内存硬上限（MB），不设限的话一段疯狂 new 的代码能把宿主机拖垮
+    max-memory-mb: 256
+    # 判题临时目录的根。留空 = 系统临时目录（Windows 上在 C 盘）。
+    # 想避开 C 盘就填 E 盘路径，比如 E:/oj-judge-tmp —— 只需把 E 盘
+    # 加进 Docker Desktop 的 File sharing，C 盘不用共享。
+    # 注意这里只放几 KB 的源码与用例，判完即删，不吃磁盘。
+    work-dir:
