@@ -1,5 +1,7 @@
 package com.ojjudge.service.Impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ojjudge.common.ErrorCode;
 import com.ojjudge.common.JsonUtils;
 import com.ojjudge.dto.JudgeCase;
@@ -76,8 +78,9 @@ public class JudgeServiceImpl implements JudgeService {
 
         List<JudgeCase> judgeCases = jsonUtils.toList(question.getJudgeCase(), JudgeCase.class);
 
+        JudgeConfig config = jsonUtils.toObject(question.getJudgeConfig(), JudgeConfig.class);
+
         JudgeInfo judgeInfo = new JudgeInfo();
-        judgeInfo.setMemory(null);
 
         if (judgeCases == null || judgeCases.isEmpty()) {
             // 没有用例不能算通过，否则"空题目"会被误判成 AC
@@ -97,7 +100,8 @@ public class JudgeServiceImpl implements JudgeService {
         executeRequest.setLanguage(submit.getLanguage());
         executeRequest.setCode(submit.getCode());
         executeRequest.setInputs(inputs);
-        executeRequest.setTimeLimit(judgeConfigTimeLimit(question));
+        executeRequest.setTimeLimit(config == null ? null : config.getTimeLimit());
+        executeRequest.setMemoryLimit(config == null ? null : config.getMemoryLimit());
 
         ExecuteResult executeResult;
         try {
@@ -123,6 +127,7 @@ public class JudgeServiceImpl implements JudgeService {
 
         judgeInfo.setMessage(status.getMessage());
         judgeInfo.setTime(maxOf(executeResult.getTimes()));
+        judgeInfo.setMemory(executeResult.getMemory());
         // 失败时把编译/运行的原始报错透传出去，用户才能自查。
         // 只给一句"编译错误"等于什么都没说。
         judgeInfo.setErrorMessage(executeResult.getErrorMessage());
@@ -210,27 +215,53 @@ public class JudgeServiceImpl implements JudgeService {
     }
 
     /**
-     * 把题目里存的时间限制（毫秒）交给沙箱；没配就用沙箱默认值。
-     */
-    private Long judgeConfigTimeLimit(Question question) {
-        JudgeConfig judgeConfig = jsonUtils.toObject(question.getJudgeConfig(), JudgeConfig.class);
-        if (judgeConfig == null) {
-            return null;
-        }
-        return judgeConfig.getTimeLimit();
-    }
-
-    /**
-     * 回写状态与判题结果
+     * 回写状态与判题结果，并在<b>首次</b>通过时给题目累加通过人数。
      */
     private void persist(QuestionSubmit submit, JudgeStatus status, JudgeInfo judgeInfo) {
+        boolean accepted = status == JudgeStatus.ACCEPTED;
+
         QuestionSubmit update = new QuestionSubmit();
         update.setId(submit.getId());
-        update.setStatus(status == JudgeStatus.ACCEPTED
+        update.setStatus(accepted
                 ? QuestionSubmit.STATUS_SUCCEED
                 : QuestionSubmit.STATUS_FAILED);
         update.setJudgeInfo(jsonUtils.toJson(judgeInfo));
         update.setUpdateTime(LocalDateTime.now());
         questionSubmitMapper.updateById(update);
+
+        if (accepted) {
+            increaseAcceptedNum(submit);
+        }
+    }
+
+    /**
+     * 给题目累加通过人数。
+     *
+     * <p><b>口径是「通过人数」而不是「通过次数」</b> —— 同一个用户对同一道题
+     * 反复提交通过只算一次。这样 {@code accepted_num / submit_num}
+     * 才是常见的「通过率」表达，而且天然幂等：判题被重跑一次也不会重复加。
+     *
+     * <p>判断方法：查该用户在这道题上，除了本次以外还有没有 status=2 的提交。
+     * 因为 {@link QuestionSubmit#STATUS_SUCCEED} 只会被 Accepted 写入
+     * （其余结论一律写 STATUS_FAILED），所以用 status 就能判断，不用去解析
+     * judge_info 里的 message。
+     */
+    private void increaseAcceptedNum(QuestionSubmit submit) {
+        try {
+            Long previous = questionSubmitMapper.selectCount(new QueryWrapper<QuestionSubmit>()
+                    .eq("question_id", submit.getQuestionId())
+                    .eq("user_id", submit.getUserId())
+                    .eq("status", QuestionSubmit.STATUS_SUCCEED)
+                    .ne("id", submit.getId()));
+            if (previous != null && previous > 0) {
+                return;                 // 之前已经通过过，不重复计数
+            }
+            questionMapper.update(null, new LambdaUpdateWrapper<Question>()
+                    .eq(Question::getId, submit.getQuestionId())
+                    .setSql("accepted_num = accepted_num + 1"));
+        } catch (Exception e) {
+            // 通过人数只是统计数据，绝不能因为它出错把判题结论给回滚掉
+            log.error("累加通过人数失败，题目 id={}", submit.getQuestionId(), e);
+        }
     }
 }

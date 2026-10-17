@@ -144,12 +144,26 @@ public class QuestionController {
     }
 
     /**
-     * 分页查询提交记录。非本人且非管理员时 code 字段为 null。
+     * 分页查询提交记录。
+     *
+     * <p>普通用户只会看到<strong>自己的</strong>提交，请求体里的 userId 会被忽略；
+     * 管理员看全部，也可以按 userId 筛。
      */
     @PostMapping("/question_submit/list/page")
     public BaseResponse<Page<QuestionSubmitVO>> listQuestionSubmitByPage(
             @RequestBody(required = false) QuestionSubmitQueryDTO queryDTO) {
         return BaseResponse.success(questionService.listQuestionSubmitByPage(
                 queryDTO == null ? new QuestionSubmitQueryDTO() : queryDTO));
+    }
+
+    /**
+     * 按 id 查单条提交记录。本人或管理员。
+     *
+     * <p>给提交后的结果轮询用 —— 比"拉一页再本地 find"省一次全表扫描，
+     * 也不会因为排序/分页变化而查不到。
+     */
+    @GetMapping("/question_submit/get")
+    public BaseResponse<QuestionSubmitVO> getQuestionSubmitById(@RequestParam("id") Long id) {
+        return BaseResponse.success(questionService.getQuestionSubmitById(id));
     }
 }

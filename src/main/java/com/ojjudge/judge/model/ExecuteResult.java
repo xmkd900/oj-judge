@@ -22,13 +22,22 @@ public class ExecuteResult implements Serializable {
     private List<String> outputs;
 
     /**
-     * 每个用例的运行耗时（毫秒）。含容器内 JVM 启动开销
- */
+     * 每个用例的运行耗时（毫秒）。
+     *
+     * <p>由<b>容器内</b>用 {@code date} 前后打点算出，
+     * 只含用户程序本身的运行时间（含 JVM 启动这类运行时开销），
+     * <b>不含</b>容器创建与销毁 —— 那部分有几百毫秒，算进来会让耗时虚高。
+     */
     private List<Long> times;
 
     /**
+     * 峰值内存（字节），取所有用例的最大值；拿不到时为 null
+     */
+    private Long memory;
+
+    /**
      * 进程退出码
- */
+     */
     private Integer exitCode;
 
     /**
@@ -41,10 +50,12 @@ public class ExecuteResult implements Serializable {
  */
     private String errorMessage;
 
-    public static ExecuteResult success(List<String> outputs, List<Long> times, Integer exitCode) {
+    public static ExecuteResult success(List<String> outputs, List<Long> times,
+                                        Long memory, Integer exitCode) {
         ExecuteResult result = new ExecuteResult();
         result.setOutputs(outputs);
         result.setTimes(times);
+        result.setMemory(memory);
         result.setExitCode(exitCode);
         result.setStatus(JudgeStatus.ACCEPTED);
         return result;

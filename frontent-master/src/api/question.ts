@@ -42,10 +42,12 @@ export interface SampleCase {
 /** 判题结果 */
 export interface JudgeInfo {
   message?: string;
-  /** 运行耗时（毫秒） */
+  /** 运行耗时（毫秒），由容器内打点算出，不含容器启停 */
   time?: number;
-  /** 内存占用 */
+  /** 峰值内存（字节） */
   memory?: number;
+  /** 编译 / 运行的原始报错（stderr），只在失败时才有值 */
+  errorMessage?: string;
 }
 
 /**
@@ -131,7 +133,10 @@ export interface QuestionSubmitQueryRequest {
   pageSize?: number;
   sortField?: string;
   sortOrder?: string;
+  /** 按提交记录主键精确查 */
+  id?: number;
   questionId?: number;
+  /** 仅管理员生效；普通用户无论传什么都只看得到自己的 */
   userId?: number;
   language?: string;
   status?: number;
@@ -270,13 +275,28 @@ export async function doQuestionSubmit(
   return unwrap(res.data);
 }
 
-/** 分页查询提交记录 */
+/**
+ * 分页查询提交记录。
+ *
+ * 注意：后端对普通用户强制收窄为「只看自己的」，这里传 userId 也不会生效。
+ */
 export async function listQuestionSubmitByPage(
   params: QuestionSubmitQueryRequest
 ): Promise<PageResult<QuestionSubmitVO>> {
   const res = await request.post<BaseResponse<PageResult<QuestionSubmitVO>>>(
     "/api/question/question_submit/list/page",
     params
+  );
+  return unwrap(res.data);
+}
+
+/** 按 id 查单条提交记录。本人或管理员，给提交后的结果轮询用 */
+export async function getQuestionSubmitById(
+  id: number
+): Promise<QuestionSubmitVO> {
+  const res = await request.get<BaseResponse<QuestionSubmitVO>>(
+    "/api/question/question_submit/get",
+    { params: { id } }
   );
   return unwrap(res.data);
 }

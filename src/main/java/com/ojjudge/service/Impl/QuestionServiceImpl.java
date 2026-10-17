@@ -204,7 +204,6 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
         submit.setUserId(current.getUserId());
         submit.setLanguage(submitAddDTO.getLanguage());
         submit.setCode(submitAddDTO.getCode());
-        // 判题沙箱尚未接入：这里只落库，状态停在"等待中"
         submit.setStatus(QuestionSubmit.STATUS_WAITING);
         submit.setCreateTime(LocalDateTime.now());
         submit.setUpdateTime(LocalDateTime.now());
@@ -233,9 +232,17 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
 
         QueryWrapper<QuestionSubmit> wrapper = new QueryWrapper<>();
         wrapper.eq(queryDTO.getQuestionId() != null, "question_id", queryDTO.getQuestionId())
-                .eq(queryDTO.getUserId() != null, "user_id", queryDTO.getUserId())
+                .eq(queryDTO.getId() != null, "id", queryDTO.getId())
                 .eq(queryDTO.getStatus() != null, "status", queryDTO.getStatus())
                 .eq(StringUtils.hasText(queryDTO.getLanguage()), "language", queryDTO.getLanguage());
+        // 收窄可见范围：普通用户只能看自己的，且必须在这里强制 ——
+        // 放在 Controller 或靠前端传 userId 都不行，改个请求体就绕过去了。
+        // 注意要"覆盖"而不是"叠加"：前端传来的 userId 一律不认，否则传别人的 id 照样能翻。
+        if (admin) {
+            wrapper.eq(queryDTO.getUserId() != null, "user_id", queryDTO.getUserId());
+        } else {
+            wrapper.eq("user_id", current.getUserId());
+        }
 
         Page<QuestionSubmit> result = questionSubmitMapper.selectPage(page, wrapper);
         Page<QuestionSubmitVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
@@ -243,6 +250,26 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
                 .map(item -> toSubmitVO(item, current.getUserId(), admin))
                 .toList());
         return voPage;
+    }
+
+    @Override
+    public QuestionSubmitVO getQuestionSubmitById(Long id) {
+        if (id == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "缺少提交记录 id");
+        }
+        LoginUserDetails current = SecurityUtils.currentUser();
+        boolean admin = current.isAdmin();
+
+        QuestionSubmit submit = questionSubmitMapper.selectById(id);
+        if (submit == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "提交记录不存在");
+        }
+        // 非本人且非管理员：不返回 404，而是 40101。
+        // 返回"不存在"会让调用方以为 id 错了，返回"无权限"才如实反映原因。
+        if (!admin && !submit.getUserId().equals(current.getUserId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "只能查看自己的提交记录");
+        }
+        return toSubmitVO(submit, current.getUserId(), admin);
     }
 
     // ------------------------------------------------------------------ 工具

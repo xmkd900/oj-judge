@@ -62,7 +62,17 @@ public interface QuestionService extends IService<Question> {
     Long doQuestionSubmit(QuestionSubmitAddDTO submitAddDTO);
 
     /**
-     * 分页查询提交记录。非本人且非管理员时 code 字段会被抹掉
+     * 分页查询提交记录。
+     *
+     * <p><b>普通用户只会看到自己的提交</b>，前端传的 userId 会被忽略；
+     * 管理员可以看全部，也可以按 userId 筛选。
      */
     Page<QuestionSubmitVO> listQuestionSubmitByPage(QuestionSubmitQueryDTO queryDTO);
+
+    /**
+     * 按 id 查单条提交记录。本人或管理员，否则 40101。
+     *
+     * <p>给提交后的轮询用：一次只查一条，不用拉一整页再本地 find。
+     */
+    QuestionSubmitVO getQuestionSubmitById(Long id);
 }

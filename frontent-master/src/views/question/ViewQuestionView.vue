@@ -116,7 +116,10 @@
           <a-alert :type="lastResult.ok ? 'success' : 'error'">
             {{ lastResult.message }}
             <span v-if="lastResult.time != null">
-              · 耗时 {{ lastResult.time }} ms
+              · 耗时 {{ formatTime(lastResult.time) }}
+            </span>
+            <span v-if="lastResult.memory != null">
+              · 内存 {{ formatMemory(lastResult.memory) }}
             </span>
           </a-alert>
           <a-collapse v-if="lastResult.errorMessage" style="margin-top: 8px">
@@ -237,16 +240,12 @@ const onLanguageChange = (language: string) => {
   previousLanguage = language;
 };
 
-/**
- * 提交代码。
- * 注意：判题是异步的，这里返回成功只代表"提交记录已创建"，
- * 结果要去提交记录页看，或轮询 question_submit/list/page。
- */
 /** 最近一次提交的结果，显示在编辑器下方 */
 const lastResult = ref<{
   ok: boolean;
   message: string;
   time?: number | null;
+  memory?: number | null;
   errorMessage?: string;
 }>();
 let watchingSubmitId: number | undefined;
@@ -277,22 +276,28 @@ const doSubmit = async () => {
   }
 };
 
+/**
+ * 轮询判题结果。
+ *
+ * 直接按 id 查这一条，不再"拉一页再本地 find" ——
+ * 后端已把列表收窄为只看自己的，拉页的方式既浪费又依赖排序刚好命中。
+ */
 const pollResult = async (submitId: number) => {
   for (let i = 0; i < 60; i++) {
-    const page = await questionApi.listQuestionSubmitByPage({
-      current: 1,
-      pageSize: 10,
-      id: submitId,
-    });
-    const rec = page.records?.find((r) => r.id === submitId);
-    if (rec && (rec.status ?? 0) >= 2) {
-      lastResult.value = {
-        ok: rec.judgeInfo?.message === "Accepted",
-        message: rec.judgeInfo?.message ?? "未知",
-        time: rec.judgeInfo?.time,
-        errorMessage: rec.judgeInfo?.errorMessage,
-      };
-      return;
+    try {
+      const rec = await questionApi.getQuestionSubmitById(submitId);
+      if ((rec.status ?? 0) >= 2) {
+        lastResult.value = {
+          ok: rec.judgeInfo?.message === "Accepted",
+          message: rec.judgeInfo?.message ?? "未知",
+          time: rec.judgeInfo?.time,
+          memory: rec.judgeInfo?.memory,
+          errorMessage: rec.judgeInfo?.errorMessage,
+        };
+        return;
+      }
+    } catch (e) {
+      // 事务刚提交的瞬间可能还没查到，忽略后继续轮询
     }
     await new Promise((r) => setTimeout(r, 1000));
   }

@@ -20,6 +20,10 @@
         <a-button type="primary" @click="doSubmit">搜索</a-button>
       </a-form-item>
     </a-form>
+    <!-- 后端对普通用户强制只返回自己的提交，这里如实告知，避免用户以为"别人的记录去哪了" -->
+    <a-alert v-if="!isAdmin" type="normal" style="margin-bottom: 12px">
+      这里只显示你自己的提交记录
+    </a-alert>
     <a-divider size="0" />
     <a-table
       ref="tableRef"
@@ -41,6 +45,9 @@
           <span v-if="record.judgeInfo?.time != null" class="judge-meta">
             耗时 {{ formatTime(record.judgeInfo.time) }}
           </span>
+          <span v-if="record.judgeInfo?.memory != null" class="judge-meta">
+            内存 {{ formatMemory(record.judgeInfo.memory) }}
+          </span>
           <!-- 失败时把原始报错展开给用户看。只给"编译错误"四个字等于没说 -->
           <a-popover
             v-if="record.judgeInfo?.errorMessage"
@@ -61,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref, watchEffect } from "vue";
+import { computed, onUnmounted, ref, watchEffect } from "vue";
 import * as questionApi from "@/api/question";
 import {
   QuestionSubmitQueryRequest,
@@ -69,9 +76,18 @@ import {
   QuestionVO,
 } from "@/api/question";
 import { formatDate } from "@/utils/date";
-import { formatTime } from "@/utils/format";
+import { formatMemory, formatTime } from "@/utils/format";
 import message from "@arco-design/web-vue/es/message";
 import { useRouter } from "vue-router";
+import { useStore } from "vuex";
+import ACCESS_ENUM from "@/access/accessEnum";
+
+const store = useStore();
+
+/** 管理员能看全部提交；普通用户的列表已被后端收窄为只看自己 */
+const isAdmin = computed(
+  () => store.state.user?.loginUser?.userRole === ACCESS_ENUM.ADMIN
+);
 
 const tableRef = ref();
 
@@ -160,36 +176,39 @@ const stopPolling = () => {
  */
 onUnmounted(stopPolling);
 
-const columns = [
-  {
-    title: "提交号",
-    dataIndex: "id",
-  },
-  {
-    title: "编程语言",
-    dataIndex: "language",
-  },
-  {
-    title: "判题信息",
-    slotName: "judgeInfo",
-  },
-  {
-    title: "判题状态",
-    dataIndex: "status",
-  },
-  {
-    title: "题目 id",
-    dataIndex: "questionId",
-  },
-  {
-    title: "提交者 id",
-    dataIndex: "userId",
-  },
-  {
-    title: "创建时间",
-    slotName: "createTime",
-  },
-];
+const columns = computed(() => {
+  const list = [
+    {
+      title: "提交号",
+      dataIndex: "id",
+    },
+    {
+      title: "编程语言",
+      dataIndex: "language",
+    },
+    {
+      title: "判题信息",
+      slotName: "judgeInfo",
+    },
+    {
+      title: "判题状态",
+      dataIndex: "status",
+    },
+    {
+      title: "题目 id",
+      dataIndex: "questionId",
+    },
+    {
+      title: "创建时间",
+      slotName: "createTime",
+    },
+  ];
+  // 列表已经收窄为只看自己的，这一列对普通用户恒等于自己，没有信息量
+  if (isAdmin.value) {
+    list.splice(5, 0, { title: "提交者 id", dataIndex: "userId" });
+  }
+  return list;
+});
 
 const onPageChange = (page: number) => {
   searchParams.value = {
