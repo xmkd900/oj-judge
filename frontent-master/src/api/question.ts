@@ -310,12 +310,48 @@ export function isAccepted(judgeInfo?: JudgeInfo): boolean {
 }
 
 /**
+ * 提交状态：0 等待中 / 1 判题中 / 2 成功 / 3 失败。
+ *
+ * <p>这是数据库里存的<b>数字</b>，直接渲染到页面上用户看到的就是 0/1/2/3，
+ * 完全不知道什么意思。所有要展示状态的地方都必须经过这里转成人话。
+ */
+export const SUBMIT_STATUS_TEXT: Record<number, string> = {
+  0: "等待中",
+  1: "判题中",
+  2: "成功",
+  3: "失败",
+};
+
+/**
+ * 状态对应的标签颜色。
+ *
+ * <p>注意这里和「判题结论」是两回事：
+ * 状态只表示"判完了没有"，结论（Accepted / 编译错误 / 超时……）才表示对错。
+ * 一条「失败」的记录，结论可能是 Wrong Answer，也可能是编译错误。
+ */
+export const SUBMIT_STATUS_COLOR: Record<number, string> = {
+  0: "gray",
+  1: "arcoblue",
+  2: "green",
+  3: "red",
+};
+
+/** 状态数字 -> 人话；未知值返回"未知"而不是把数字露出去 */
+export function formatSubmitStatus(status?: number): string {
+  if (status === undefined || status === null) {
+    return "未知";
+  }
+  return SUBMIT_STATUS_TEXT[status] ?? "未知";
+}
+
+/**
  * 各语言的初始代码模板。
  *
  * 为什么必须有这个：判题沙箱把源码写成固定文件名再编译，
- *   Java  -> Main.java，所以 public 类名必须是 **Main**
- *   C++   -> main.cpp，入口是 main()
- *   Go    -> main.go，必须是 package main + func main()
+ *   Java   -> Main.java，所以 public 类名必须是 **Main**
+ *   C++    -> main.cpp，入口是 main()
+ *   Go     -> main.go，必须是 package main + func main()
+ *   Python -> main.py，无需特定入口
  *
  * 编辑器如果一开始是空的，用户很容易从 LeetCode 之类的地方复制
  * `class Solution` 过来 —— 文件名对不上，javac 直接报编译错误，
@@ -353,6 +389,20 @@ func main() {
     // 在这里写你的代码
 }
 `,
+  // Python 不需要特定入口，但缩进必须是空格或制表符之一，别混用。
+  // input() 读一行、sys.stdin.read() 一次读完都行，判题不限制方式。
+  python: `# Python 3。从标准输入读、向标准输出写即可，读写方式不限
+import sys
+
+
+def main():
+    data = sys.stdin.read().split()
+    # 在这里写你的代码
+
+
+if __name__ == "__main__":
+    main()
+`,
 };
 
 /**
@@ -366,6 +416,9 @@ export const LANGUAGE_TIPS: Record<string, string> = {
   java: "入口类必须是 Main，不能有 package 声明。从标准输入读、向标准输出写即可，读写方式不限。",
   cpp: "入口是 main()。从标准输入读、向标准输出写即可，读写方式不限。",
   go: "必须是 package main 且包含 func main()。从标准输入读、向标准输出写即可，读写方式不限。",
+  python:
+    "文件名为 main.py（Python 3）。从标准输入读、向标准输出写即可，读写方式不限。" +
+    "注意缩进不要混用空格和制表符。",
 };
 
 /** 取某语言的初始模板；未知语言返回空串 */

@@ -71,6 +71,39 @@ public enum LanguageEnum {
             func main() {
             }
             """),
+
+    /**
+     * Python 3.12，解释型语言。
+     *
+     * <p>为什么选 {@code python:3.12-slim}（Debian 系）而不是 alpine 版：
+     * alpine 用的是 musl libc，CPython 在那上面的行为跟主流环境有细微差异，
+ * 而且 shell 工具是 busybox（{@code date} 的纳秒精度、小数 {@code sleep}
+ * 都得靠我们的降级分支兜着）。slim 版是 glibc + GNU coreutils，
+     * 和我们另外两个镜像的底座一致，判题脚本不用走任何降级路径。
+     *
+     * <p><b>「编译」这一步在做什么</b>：Python 不需要编译，但沙箱流程固定会有这一步，
+     * 于是让它跑 {@code python -m py_compile main.py} —— 一次纯语法检查：
+     * <ul>
+     *   <li>语法错了就在这里被拦下，错误信息原样返回给用户，不用等到运行阶段；</li>
+     *   <li>顺带在目录里生成 {@code __pycache__}，运行阶段能直接复用，省掉重复编译。</li>
+     * </ul>
+     *
+     * <p><b>运行命令前的 {@code PYTHONIOENCODING=utf-8}</b>：
+     * 实测这个镜像默认的 stdout / stdin 编码已经是 utf-8（PEP 538 的 locale 强制转换生效了），
+     * 这里显式写上是为了不依赖镜像的默认 locale —— 换个镜像、或者环境变量被改动时，
+     * 少了它可能输出中文就报 UnicodeEncodeError。
+     */
+    PYTHON("python", "main.py", "python:3.12-slim",
+            "python -m py_compile main.py",
+            "PYTHONIOENCODING=utf-8 python main.py",
+            """
+            def main():
+                pass
+
+
+            if __name__ == "__main__":
+                main()
+            """),
     ;
 
     private final String value;

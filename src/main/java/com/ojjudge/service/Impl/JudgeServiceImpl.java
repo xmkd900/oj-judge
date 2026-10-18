@@ -135,6 +135,33 @@ public class JudgeServiceImpl implements JudgeService {
         return judgeInfo;
     }
 
+    @Override
+    public void markJudgeFailed(Long questionSubmitId, String reason) {
+        if (questionSubmitId == null) {
+            return;
+        }
+        QuestionSubmit submit = questionSubmitMapper.selectById(questionSubmitId);
+        if (submit == null) {
+            return;
+        }
+        // 已经出结果就别覆盖。
+        // 崩溃可能发生在"结果已写回、方法还没返回"这个窗口里 ——
+        // 那时真结论已经落库了，再盖一层"判题服务异常"会把真结果弄丢。
+        Integer status = submit.getStatus();
+        if (status != null && status >= QuestionSubmit.STATUS_SUCCEED) {
+            log.warn("提交记录 id={} 已有结论（status={}），不覆盖为失败", questionSubmitId, status);
+            return;
+        }
+
+        JudgeInfo judgeInfo = new JudgeInfo();
+        judgeInfo.setMessage(JudgeStatus.SYSTEM_ERROR.getMessage());
+        judgeInfo.setTime(0L);
+        // 把原因带上，否则用户只看到"判题服务异常"，排查的人也无从下手
+        judgeInfo.setErrorMessage(truncate(reason, 500));
+        persist(submit, JudgeStatus.SYSTEM_ERROR, judgeInfo);
+        log.warn("已把提交记录 id={} 标记为判题服务异常", questionSubmitId);
+    }
+
     // ------------------------------------------------------------------ 内部
 
     /**

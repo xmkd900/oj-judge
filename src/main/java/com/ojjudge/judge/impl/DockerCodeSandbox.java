@@ -108,6 +108,7 @@ public class DockerCodeSandbox implements CodeSandbox {
      * （拼字符串、反射、Unicode 转义……）。真正的安全边界是容器。
      */
     private static final List<String> DANGEROUS_PATTERNS = List.of(
+            // Java
             "Runtime.getRuntime",
             "ProcessBuilder",
             "System.exit",
@@ -115,7 +116,12 @@ public class DockerCodeSandbox implements CodeSandbox {
             "java.nio.file",
             "FileOutputStream",
             "FileInputStream",
-            "sun.misc.Unsafe"
+            "sun.misc.Unsafe",
+            // Python / 通用
+            "os.system",
+            "subprocess",
+            "__import__",
+            "shutil.rmtree"
     );
 
     /**
@@ -564,10 +570,10 @@ public class DockerCodeSandbox implements CodeSandbox {
      * 判题根目录。配了 {@code judge.sandbox.work-dir} 就用它，
      * 否则用系统临时目录下的 {@code oj-judge} 子目录。
      *
-     * <p>容器池在创建时把这个目录<b>整体</b>挂进容器，所以每次判题只需建子目录，
+     * <p>容器池在创建时把这个目录整体挂进容器，所以每次判题只需建子目录，
      * 不需要重新挂载。
      *
-     * <p><b>为什么不能直接用系统临时目录当根</b>：挂进去的东西用户代码全都看得见、
+     * 为什么不能直接用系统临时目录当根：挂进去的东西用户代码全都看得见、
      * 也写得动。用临时目录本身当根等于把用户 Temp 下的其它文件一并暴露给提交的代码，
      * 而那本来是不该被看到的。专门开一层 {@code oj-judge} 子目录，
      * 暴露面就只剩下判题自己的文件。

@@ -13,7 +13,7 @@
           <a-option>java</a-option>
           <a-option>cpp</a-option>
           <a-option>go</a-option>
-          <a-option>html</a-option>
+          <a-option>python</a-option>
         </a-select>
       </a-form-item>
       <a-form-item>
@@ -37,18 +37,16 @@
       }"
       @page-change="onPageChange"
     >
-      <template #judgeInfo="{ record }">
+      <!-- 结论列：判完了就是 Accepted / 编译错误 / 超时……，没判完就显示"等待中/判题中" -->
+      <template #status="{ record }">
         <a-space direction="vertical" size="mini">
-          <a-tag :color="statusColor(record.judgeInfo?.message)">
-            {{ record.judgeInfo?.message ?? "等待中" }}
+          <a-tag :color="resultColor(record.judgeInfo?.message, record.status)">
+            {{ record.judgeInfo?.message ?? formatSubmitStatus(record.status) }}
           </a-tag>
-          <span v-if="record.judgeInfo?.time != null" class="judge-meta">
-            耗时 {{ formatTime(record.judgeInfo.time) }}
-          </span>
-          <span v-if="record.judgeInfo?.memory != null" class="judge-meta">
-            内存 {{ formatMemory(record.judgeInfo.memory) }}
-          </span>
-          <!-- 失败时把原始报错展开给用户看。只给"编译错误"四个字等于没说 -->
+          <!--
+            报错详情跟着结论走。只给"编译错误"四个字等于什么都没说，
+            最常见的其实是类名不是 Main，javac 的原文里写得清清楚楚。
+          -->
           <a-popover
             v-if="record.judgeInfo?.errorMessage"
             :content-style="{ maxWidth: '480px' }"
@@ -58,6 +56,25 @@
               <pre class="error-detail">{{ record.judgeInfo.errorMessage }}</pre>
             </template>
           </a-popover>
+        </a-space>
+      </template>
+      <!-- 指标列：只放耗时和内存。结论和报错都在左边那列 -->
+      <template #judgeInfo="{ record }">
+        <a-space direction="vertical" size="mini">
+          <span v-if="record.judgeInfo?.time != null" class="judge-meta">
+            耗时 {{ formatTime(record.judgeInfo.time) }}
+          </span>
+          <span v-if="record.judgeInfo?.memory != null" class="judge-meta">
+            内存 {{ formatMemory(record.judgeInfo.memory) }}
+          </span>
+          <span
+            v-if="
+              record.judgeInfo?.time == null && record.judgeInfo?.memory == null
+            "
+            class="judge-meta"
+          >
+            —
+          </span>
         </a-space>
       </template>
       <template #createTime="{ record }">
@@ -71,6 +88,7 @@
 import { computed, onUnmounted, ref, watchEffect } from "vue";
 import * as questionApi from "@/api/question";
 import {
+  formatSubmitStatus,
   QuestionSubmitQueryRequest,
   QuestionSubmitVO,
   QuestionVO,
@@ -123,20 +141,32 @@ watchEffect(() => {
 });
 
 /**
- * 结论对应的标签颜色。
+ * 结论标签的颜色 + 文案来源。
  *
- * ⚠️ 只认 "Accepted" 才是通过 —— judgeInfo.message 是中英文混杂的，
- * 别按英文枚举去匹配，其余一律视为未通过。
+ * <p>这一列有两条数据来源，优先级是「结论 > 状态」：
+ * <ol>
+ *   <li>判完了 —— 用 {@code judgeInfo.message}（Accepted / 编译错误 / 超时……）</li>
+ *   <li>还没判完 —— 退回 {@code status}（0 等待中 / 1 判题中）</li>
+ * </ol>
+ *
+ * <p>⚠️ 只认 "Accepted" 才算通过 —— message 是中英文混杂的，
+ * 别按英文枚举去匹配。
+ *
+ * <p>「判题服务异常」单独给橙色：那是我们自己的问题（比如 Docker 没起），
+ * 不是用户代码错了，不该和用户写错代码用同一个颜色。
  */
-const statusColor = (message?: string) => {
+const resultColor = (message?: string, status?: number): string => {
   if (message === "Accepted") return "green";
-  if (!message) return "gray";
-  return "red";
+  if (message) return message === "判题服务异常" ? "orange" : "red";
+  if (status === 1) return "arcoblue";
+  if (status === 3) return "red";
+  return "gray";
 };
 
 /** 还没出结果：等待中 / 判题中 */
 const isPending = (record: QuestionSubmitVO) =>
   record.status === 0 || record.status === 1;
+
 
 /**
  * 有提交还在排队时自动刷新。
@@ -187,12 +217,12 @@ const columns = computed(() => {
       dataIndex: "language",
     },
     {
-      title: "判题信息",
-      slotName: "judgeInfo",
+      title: "判题状态",
+      slotName: "status",
     },
     {
-      title: "判题状态",
-      dataIndex: "status",
+      title: "判题信息",
+      slotName: "judgeInfo",
     },
     {
       title: "题目 id",

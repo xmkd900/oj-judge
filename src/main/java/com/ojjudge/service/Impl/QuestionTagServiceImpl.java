@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -124,10 +125,19 @@ public class QuestionTagServiceImpl extends ServiceImpl<QuestionTagMapper, Quest
     }
 
     /**
-     * 标签归一化：去空白、去重、截断、限制数量。
+     * 标签归一化：去空白、统一小写、去重、截断、限制数量。
      *
      * <p>不要小看这一步 —— 用户手打标签必然出现 "Java" / "java" / " Java "，
      * 不在入库前统一，筛选就永远筛不准。
+     *
+     * <p><b>为什么要统一小写</b>：筛选是精确匹配，
+     * "Java" 和 "java" 存成两条的话，筛 "Java" 只会命中一半题目。
+     * 中文标签不受影响（{@code toLowerCase} 对汉字是无操作），
+     * 所以只对英文/数字标签起作用。
+     *
+     * <p>用 {@link java.util.Locale#ROOT} 而不是默认 Locale：
+     * 默认的土耳其语环境下 "I".toLowerCase() 会变成无点的 "ı"，
+     * 那会产生另一类同义词问题。
      */
     private List<String> normalize(List<String> tags) {
         if (CollectionUtils.isEmpty(tags)) {
@@ -138,11 +148,11 @@ public class QuestionTagServiceImpl extends ServiceImpl<QuestionTagMapper, Quest
             if (!StringUtils.hasText(tag)) {
                 continue;
             }
-            String trimmed = tag.trim();
-            if (trimmed.length() > MAX_TAG_LENGTH) {
-                trimmed = trimmed.substring(0, MAX_TAG_LENGTH);
+            String normalized = tag.trim().toLowerCase(Locale.ROOT);
+            if (normalized.length() > MAX_TAG_LENGTH) {
+                normalized = normalized.substring(0, MAX_TAG_LENGTH);
             }
-            set.add(trimmed);
+            set.add(normalized);
             if (set.size() >= MAX_TAGS_PER_QUESTION) {
                 break;
             }
