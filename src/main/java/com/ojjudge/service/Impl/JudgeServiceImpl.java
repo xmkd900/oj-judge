@@ -2,6 +2,7 @@ package com.ojjudge.service.Impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.ojjudge.cache.CacheNames;
 import com.ojjudge.common.ErrorCode;
 import com.ojjudge.common.JsonUtils;
 import com.ojjudge.dto.JudgeCase;
@@ -19,6 +20,8 @@ import com.ojjudge.mapper.QuestionSubmitMapper;
 import com.ojjudge.service.JudgeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -58,6 +61,8 @@ public class JudgeServiceImpl implements JudgeService {
     private final CodeSandbox codeSandbox;
 
     private final JsonUtils jsonUtils;
+
+    private final CacheManager cacheManager;
 
     /**
      * 对一条提交记录执行判题，并回写状态与 judgeInfo。
@@ -286,9 +291,32 @@ public class JudgeServiceImpl implements JudgeService {
             questionMapper.update(null, new LambdaUpdateWrapper<Question>()
                     .eq(Question::getId, submit.getQuestionId())
                     .setSql("accepted_num = accepted_num + 1"));
+            // accepted_num 变了，题目详情缓存里的"通过率"就过期了。
+            // 这里之所以不用 @CacheEvict 注解：本方法是 private，注解不会被代理拦截 ——
+            // 加在 doJudge 上又拿不到具体是哪道题（它返回的是 JudgeInfo）。
+            evictQuestionCache(submit.getQuestionId());
         } catch (Exception e) {
             // 通过人数只是统计数据，绝不能因为它出错把判题结论给回滚掉
             log.error("累加通过人数失败，题目 id={}", submit.getQuestionId(), e);
+        }
+    }
+
+    /**
+     * 清除某道题的详情缓存。
+     *
+     * <p>手写调用<b>不走</b> {@code CacheConfig} 里的 {@code CacheErrorHandler}
+     * （那个只拦注解式的操作），所以这里必须自己兜住 ——
+     * Redis 抖动时不能让判题线程抛异常出去。
+     */
+    private void evictQuestionCache(Long questionId) {
+        try {
+            Cache cache = cacheManager.getCache(CacheNames.QUESTION);
+            if (cache != null) {
+                cache.evict(questionId);
+            }
+        } catch (Exception e) {
+            // 清不掉最多让通过率显示旧值，等 TTL 到期自动纠正
+            log.warn("清除题目缓存失败，题目 id={}，等 TTL 到期后自动纠正", questionId, e);
         }
     }
 }

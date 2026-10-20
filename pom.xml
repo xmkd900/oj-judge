@@ -102,6 +102,14 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+        <!--
+            缓存：不需要额外依赖。
+            Spring Cache 抽象（@EnableCaching / @Cacheable / CacheManager）本来就长在
+            spring-context 里，而 RedisCacheManager 在 spring-boot-starter-data-redis 里 ——
+            上面那条 data-redis 是拿来存 Refresh Token 的，这里顺手把缓存也一起解决了。
+            之前加过 spring-boot-starter-cache，实测是多余的（Boot 4 上它只多拉一个
+            spring-boot-autoconfigure 的子模块），去掉以免多一层版本耦合。
+        -->
     </dependencies>
 
     <build>

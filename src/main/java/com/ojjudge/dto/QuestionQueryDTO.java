@@ -7,6 +7,8 @@ import lombok.EqualsAndHashCode;
 import java.io.Serializable;
 import java.util.List;
 
+import static com.ojjudge.service.QuestionTagService.MODE_AND;
+
 /**
  * 题目列表查询（公开接口，返回脱敏 VO）。
  *
@@ -38,5 +40,29 @@ public class QuestionQueryDTO extends SortablePageRequest implements Serializabl
      * 多标签的匹配方式：and = 同时含全部标签（交集，越筛越窄，默认）；
      * or = 含任意一个即可（并集）
      */
-    private String tagMatchMode = com.ojjudge.service.QuestionTagService.MODE_AND;
+    private String tagMatchMode = MODE_AND;
+
+    /**
+     * 这次查询是否带了筛选条件（标题关键词 或 标签）。
+     *
+     * <p>列表骨架缓存用它来决定值不值得缓存，原因见
+     * {@code QuestionCacheService#listQuestionIdPage}。
+     *
+     * <p>判断方式和后端 {@code QuestionTagServiceImpl.normalize} 保持一致：
+     * 空白标签不算数，所以 {@code tags=[""]} 等同于没传标签。
+     */
+    public boolean hasFilter() {
+        if (title != null && !title.isBlank()) {
+            return true;
+        }
+        if (tags == null || tags.isEmpty()) {
+            return false;
+        }
+        for (String tag : tags) {
+            if (tag != null && !tag.isBlank()) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

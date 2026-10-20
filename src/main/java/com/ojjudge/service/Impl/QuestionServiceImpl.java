@@ -3,11 +3,13 @@ package com.ojjudge.service.Impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
+import com.ojjudge.cache.CacheNames;
+import com.ojjudge.cache.QuestionCacheService;
+import com.ojjudge.cache.QuestionIdPage;
 import com.ojjudge.common.CommonConstant;
 import com.ojjudge.common.ErrorCode;
 import com.ojjudge.common.JsonUtils;
 import com.ojjudge.common.SortUtils;
-import com.ojjudge.dto.JudgeConfig;
 import com.ojjudge.dto.JudgeInfo;
 import com.ojjudge.dto.QuestionAddDTO;
 import com.ojjudge.dto.QuestionAdminQueryDTO;
@@ -16,7 +18,6 @@ import com.ojjudge.dto.QuestionQueryDTO;
 import com.ojjudge.dto.QuestionSubmitAddDTO;
 import com.ojjudge.dto.QuestionSubmitQueryDTO;
 import com.ojjudge.dto.QuestionUpdateDTO;
-import com.ojjudge.dto.SampleCase;
 import com.ojjudge.entity.Question;
 import com.ojjudge.judge.event.SubmitCreatedEvent;
 import com.ojjudge.entity.QuestionSubmit;
@@ -31,6 +32,8 @@ import com.ojjudge.vo.QuestionSubmitVO;
 import com.ojjudge.vo.QuestionVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -55,34 +58,40 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
 
     private final JsonUtils jsonUtils;
 
+    private final QuestionCacheService questionCacheService;
+
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     // ------------------------------------------------------------ 查询（脱敏）
 
+    /**
+     * 题目列表（公开接口，游客也能看）。
+     *
+     * <p>拆成两步走缓存，原因见 {@link com.ojjudge.cache.CacheNames#QUESTION_IDS}：
+     * 先取"这一页有哪些 id、共几条"（只在题目增删改时失效），
+     * 再按 id 取每题详情（判题回写时按 id 精确失效）。
+     * 全命中时一次 SQL 都不用打。
+     */
     @Override
     public Page<QuestionVO> listQuestionVoByPage(QuestionQueryDTO queryDTO) {
-        Page<Question> page = new Page<>(queryDTO.getCurrent(), queryDTO.getPageSize());
-        SortUtils.apply(page, queryDTO.getSortField(), queryDTO.getSortOrder(),
-                CommonConstant.QUESTION_SORT_FIELDS, DEFAULT_QUESTION_SORT);
+        QuestionIdPage idPage = questionCacheService.listQuestionIdPage(queryDTO);
+        List<QuestionVO> records = questionCacheService.getQuestionVoBatch(idPage.getIds());
 
-        QueryWrapper<Question> wrapper = new QueryWrapper<>();
-        wrapper.eq(queryDTO.getId() != null, "id", queryDTO.getId())
-                .like(StringUtils.hasText(queryDTO.getTitle()), "title", queryDTO.getTitle());
-        applyTagFilter(wrapper, queryDTO.getTags(), queryDTO.getTagMatchMode());
-
-        Page<Question> result = this.page(page, wrapper);
-        Page<QuestionVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
-        voPage.setRecords(toVOList(result.getRecords()));
+        Page<QuestionVO> voPage = new Page<>(queryDTO.getCurrent(), queryDTO.getPageSize(),
+                idPage.getTotal());
+        voPage.setRecords(records);
         return voPage;
     }
 
+    /**
+     * 单道题的脱敏详情。
+     *
+     * <p>缓存实现在 {@link QuestionCacheService#getQuestionVo(Long)} ——
+     * 必须跨 Bean 调用，同类内部调用走不到代理、缓存会静默失效。
+     */
     @Override
     public QuestionVO getQuestionVoById(Long id) {
-        Question question = this.getById(id);
-        if (question == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "题目不存在");
-        }
-        return toVO(question, questionTagService.listTagsByQuestionId(id));
+        return questionCacheService.getQuestionVo(id);
     }
 
     // ---------------------------------------------------------- 查询（完整实体）
@@ -119,7 +128,33 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
 
     // ------------------------------------------------------------------ 写操作
 
+    /*
+     * 下面是五个"必须清缓存"的写操作。三条规则：
+     *
+     *   动到标签关联表（question_tag）        → 清 TAGS 整份
+     *   动到"有哪些题、共几条"                → 清 QUESTION_IDS 整份（新增/编辑/删除）
+     *   动到某道题的内容或统计字段            → 清 QUESTION 那道题
+     *
+     * ⚠️ 最关键的一条：<b>判题回写不该碰 QUESTION_IDS</b>。
+     * 判题只改 submit_num / accepted_num，那是 QuestionVO 里的内容，
+     * 不影响"有哪些题、共几条"。把两个缓存分开就是为了这个 ——
+     * 判一次题只失效一个 key，而不是把整片列表缓存冲掉。
+     *
+     * 两个容易漏的点：
+     *   1. 新增题目也要清 TAGS —— 新题可能带来从没出现过的标签
+     *   2. doQuestionSubmit 会 submit_num + 1，而这个字段就在 QuestionVO 里，
+     *      不清的话"通过率"的分母会一直显示旧值
+     *
+     * 注解默认在方法正常返回后才清（抛异常不清，正好符合预期）。
+     * 少数情况下清除发生在事务提交之前，理论上存在"并发读把旧数据又写回缓存"的窗口，
+     * 这个窗口由 TTL 兜底 —— 最多脏 question-minutes 分钟，不是永久。
+     */
+
     @Override
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CacheNames.TAGS, allEntries = true),
+            @CacheEvict(cacheNames = CacheNames.QUESTION_IDS, allEntries = true)
+    })
     public Long addQuestion(QuestionAddDTO addDTO) {
         LoginUserDetails current = SecurityUtils.currentUser();
 
@@ -147,6 +182,11 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CacheNames.TAGS, allEntries = true),
+            @CacheEvict(cacheNames = CacheNames.QUESTION_IDS, allEntries = true),
+            @CacheEvict(cacheNames = CacheNames.QUESTION, key = "#editDTO.id")
+    })
     public boolean editQuestion(QuestionEditDTO editDTO) {
         Question old = this.getById(editDTO.getId());
         if (old == null) {
@@ -158,6 +198,11 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CacheNames.TAGS, allEntries = true),
+            @CacheEvict(cacheNames = CacheNames.QUESTION_IDS, allEntries = true),
+            @CacheEvict(cacheNames = CacheNames.QUESTION, key = "#updateDTO.id")
+    })
     public boolean updateQuestion(QuestionUpdateDTO updateDTO) {
         requireAdmin();
         Question old = this.getById(updateDTO.getId());
@@ -168,6 +213,11 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
     }
 
     @Override
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CacheNames.TAGS, allEntries = true),
+            @CacheEvict(cacheNames = CacheNames.QUESTION_IDS, allEntries = true),
+            @CacheEvict(cacheNames = CacheNames.QUESTION, key = "#id")
+    })
     public boolean deleteQuestion(Long id) {
         Question old = this.getById(id);
         if (old == null) {
@@ -191,6 +241,7 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = CacheNames.QUESTION, key = "#submitAddDTO.questionId")
     public Long doQuestionSubmit(QuestionSubmitAddDTO submitAddDTO) {
         LoginUserDetails current = SecurityUtils.currentUser();
 
@@ -360,30 +411,11 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
         }
     }
 
-    /**
-     * 批量转换，一次性把标签查回来，避免 N+1
+    /*
+     * toVO / toVOList 已经搬到 QuestionCacheService 里了 ——
+     * 列表和详情现在共用同一份"题目行"缓存，转换逻辑必须和缓存读写放在一起，
+     * 否则两边拼出来的 VO 会不一样（比如一边带标签一边不带）。
      */
-    private List<QuestionVO> toVOList(List<Question> questions) {
-        if (questions == null || questions.isEmpty()) {
-            return List.of();
-        }
-        List<Long> ids = questions.stream().map(Question::getId).toList();
-        Map<Long, List<String>> tagsMap = questionTagService.listTagsByQuestionIds(ids);
-        return questions.stream()
-                .map(q -> toVO(q, tagsMap.getOrDefault(q.getId(), List.of())))
-                .toList();
-    }
-
-    private QuestionVO toVO(Question question, List<String> tags) {
-        QuestionVO vo = new QuestionVO();
-        BeanUtils.copyProperties(question, vo);
-        // 标签以关联表为准
-        vo.setTags(tags == null || tags.isEmpty() ? List.of() : tags);
-        vo.setJudgeConfig(jsonUtils.toObject(question.getJudgeConfig(), JudgeConfig.class));
-        // 示例是公开的，随 VO 一起返回给做题的人
-        vo.setSamples(jsonUtils.toList(question.getSamples(), SampleCase.class));
-        return vo;
-    }
 
     /**
      * 标签筛选：先由 QuestionTagService 算出命中的题目 id，再拼进 IN 条件。

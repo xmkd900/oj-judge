@@ -63,6 +63,21 @@ logging:
   level:
     com.ojjudge: info
 
+# ===== 缓存 =====
+# 数据存在 Redis db0（和 Refresh Token 同一个库，key 前缀不同，互不干扰）。
+# TTL 是"兜底"而不是"主要失效手段" —— 正常失效靠写操作里的 @CacheEvict，
+# TTL 只负责在漏了失效点的时候自动纠正，不至于永久返回旧数据。
+cache:
+  ttl:
+    # 标签列表。改动极少（只有新增/编辑题目才会变），可以给长一点
+    tags-minutes: 30
+    # 题目详情。里面带 submit_num / accepted_num，判题回写很频繁，
+    # 给短一点，万一哪条回写路径漏了清缓存，脏数据也活不过这个时间
+    question-minutes: 10
+    # 列表骨架（总数 + id 顺序）。它只在题目增删改时才失效，
+    # 判题回写不影响它，所以可以给长一点
+    question-ids-minutes: 30
+
 judge:
   sandbox:
     # 宿主机侧的兜底宽限（毫秒），叠加在整个运行阶段预算之上。

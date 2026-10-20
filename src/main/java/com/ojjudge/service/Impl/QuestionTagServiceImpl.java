@@ -2,11 +2,13 @@ package com.ojjudge.service.Impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
+import com.ojjudge.cache.CacheNames;
 import com.ojjudge.entity.QuestionTag;
 import com.ojjudge.mapper.QuestionTagMapper;
 import com.ojjudge.service.QuestionTagService;
 import com.ojjudge.vo.TagVO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -112,10 +114,23 @@ public class QuestionTagServiceImpl extends ServiceImpl<QuestionTagMapper, Quest
                 .toList();
     }
 
+    /**
+     * 全站标签 + 使用次数。给「创建题目」页的标签下拉用，每个用户开一次页面就查一次。
+     *
+     * <p>这个方法以前是全表扫描（{@code SELECT id,question_id,tag,create_time FROM question_tag}
+     * 无 WHERE 无 LIMIT，本地 32 行标签要 8~14ms）。标签是"几乎不变、人人要看"的典型，
+     * 所以整份结果缓存起来。
+     *
+     * <p>无 key（等价于常量 key）：这份数据是全局的，只有一份。
+     * 失效点：见 {@link com.ojjudge.cache.CacheNames#TAGS}。
+     *
+     * <p>{@code sync = true} 是防缓存击穿：缓存过期那一瞬间，
+     * 几十个并发请求会同时穿过缓存打到数据库（而且它们查的是同一份数据）。
+     * 加了之后同一时刻只有一个线程真正去查，其余等它写完直接读缓存。
+     */
     @Override
+    @Cacheable(cacheNames = CacheNames.TAGS, sync = true)
     public List<TagVO> listAllTags() {
-        // 全表按 tag 分组统计。标签量远小于题目量，可接受；
-        // 若将来标签很多，可以加一张标签计数字段或缓存。
         Map<String, Long> counted = this.list().stream()
                 .collect(Collectors.groupingBy(QuestionTag::getTag, Collectors.counting()));
         return counted.entrySet().stream()
