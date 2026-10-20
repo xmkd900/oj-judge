@@ -48,6 +48,18 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
 
+    /**
+     * 用户被删除后，账号改名用的标记。后面会拼上 id，保证每次删除都不重复。
+     * 详见 {@link #doLogicalDelete}。
+     */
+    private static final String DELETED_ACCOUNT_SUFFIX = "#deleted#";
+
+    /**
+     * {@code user.user_account} 的列宽（varchar(256)），用于改名时兜底截断。
+     */
+    private static final int ACCOUNT_COLUMN_LENGTH = 256;
+
+
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
@@ -63,6 +75,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
         if (userAccount == null || userAccount.trim().length() < UserConstant.ACCOUNT_MIN_LENGTH) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号长度不能少于 " + UserConstant.ACCOUNT_MIN_LENGTH + " 位");
+        }
+        if (userAccount.length() > UserConstant.ACCOUNT_MAX_LENGTH) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号长度不能超过 " + UserConstant.ACCOUNT_MAX_LENGTH + " 位");
         }
         if (userPassword == null || userPassword.length() < UserConstant.PASSWORD_MIN_LENGTH) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "密码长度不能少于 " + UserConstant.PASSWORD_MIN_LENGTH + " 位");
@@ -372,7 +387,40 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (UserConstant.ROLE_ADMIN.equals(user.getUserRole()) && countAdmin() <= 1) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "至少要保留一个管理员");
         }
-        return this.removeById(id);
+        return doLogicalDelete(user);
+    }
+
+    /**
+     * 逻辑删除用户，并先把账号腾出来。
+     *
+     * <p>⚠️ 为什么要多"改名"这一步：逻辑删除<b>只是打个标记，行还留在表里</b>。
+     * 而 {@code user_account} 上有唯一索引（防止并发注册撞号），
+     * 那么这条"已删除"的记录会一直占着这个名字 —— 结果就是这个账号
+     * <b>永远无法再被注册</b>，连原来的主人都找不回来。
+     *
+     * <p>所以删除前先把账号改成一个绝对不会冲突的值（原名 + 标记 + id），
+     * 把名字释放出来。已删除的行反正查不到（MyBatis-Plus 会自动带
+     * {@code is_delete = 0}），账号被改名没有任何副作用。
+     *
+     * <p>后缀里带 {@code id} 是关键：只加固定后缀的话，同名账号删两次
+     * 依然会撞唯一索引，而 id 保证了每次删除都得到不同的值。
+     */
+    private boolean doLogicalDelete(User user) {
+        String renamed = user.getUserAccount() + DELETED_ACCOUNT_SUFFIX + user.getId();
+        // 数据库是 varchar(256)。虽然注册时限制了账号长度，但对历史数据不放心，
+        // 这里兜个底：真超长就砍掉开头、保留尾部 —— 尾部的 id 是保证唯一性的关键，
+        // 绝不能砍。
+        if (renamed.length() > ACCOUNT_COLUMN_LENGTH) {
+            renamed = renamed.substring(renamed.length() - ACCOUNT_COLUMN_LENGTH);
+        }
+
+        User rename = new User();
+        rename.setId(user.getId());
+        rename.setUserAccount(renamed);
+        rename.setUpdateTime(LocalDateTime.now());
+        this.updateById(rename);
+
+        return this.removeById(user.getId());
     }
 
     @Override
