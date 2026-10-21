@@ -68,7 +68,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     // ------------------------------------------------------------------ 注册
 
     @Override
-    public Long register(UserRegisterDTO dto) {
+    public Long  register(UserRegisterDTO dto) {
         String userAccount = dto.getUserAccount();
         String userPassword = dto.getUserPassword();
         String checkPassword = dto.getCheckPassword();
@@ -387,7 +387,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (UserConstant.ROLE_ADMIN.equals(user.getUserRole()) && countAdmin() <= 1) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "至少要保留一个管理员");
         }
-        return doLogicalDelete(user);
+        boolean deleted = doLogicalDelete(user);
+        // 账号都注销了，refresh token 当然也要一并吊销
+        if (deleted) {
+            refreshTokenService.revokeAll(id);
+        }
+        return deleted;
     }
 
     /**
@@ -407,9 +412,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      */
     private boolean doLogicalDelete(User user) {
         String renamed = user.getUserAccount() + DELETED_ACCOUNT_SUFFIX + user.getId();
-        // 数据库是 varchar(256)。虽然注册时限制了账号长度，但对历史数据不放心，
-        // 这里兜个底：真超长就砍掉开头、保留尾部 —— 尾部的 id 是保证唯一性的关键，
-        // 绝不能砍。
         if (renamed.length() > ACCOUNT_COLUMN_LENGTH) {
             renamed = renamed.substring(renamed.length() - ACCOUNT_COLUMN_LENGTH);
         }
@@ -437,7 +439,16 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         user.setUserRole(UserConstant.ROLE_BAN);
         user.setUpdateTime(LocalDateTime.now());
-        return this.updateById(user);
+        boolean updated = this.updateById(user);
+
+        // 把他的 refresh token 全吊销。
+        // 光改数据库角色是不够的：他手上那张 access token 里还写着旧角色，
+        // 虽然 JwtAuthenticationFilter 会回查数据库挡住写操作，
+        // 但吊销 refresh token 能让他连"续期"都做不到 —— 过期后彻底登出。
+        if (updated) {
+            refreshTokenService.revokeAll(id);
+        }
+        return updated;
     }
 
     @Override

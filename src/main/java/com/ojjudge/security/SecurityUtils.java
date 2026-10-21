@@ -30,4 +30,21 @@ public final class SecurityUtils {
     public static Long currentUserId() {
         return currentUser().getUserId();
     }
+
+    /**
+     * 取当前登录用户 id，<b>未登录返回 null</b>。
+     *
+     * <p>用于公开接口里"顺便"带上和当前用户相关的状态 ——
+     * 比如帖子列表是游客也能看的，但登录的人想知道"我赞过没"。
+     * 这种场景不能因为没登录就整个接口失败，所以用这个而不是
+     * {@link #currentUserId()}。
+     */
+    public static Long currentUserIdOrNull() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null
+                || !(authentication.getPrincipal() instanceof LoginUserDetails principal)) {
+            return null;
+        }
+        return principal.getUserId();
+    }
 }

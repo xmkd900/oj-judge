@@ -61,7 +61,9 @@
               </template>
             </a-card>
           </a-tab-pane>
-          <a-tab-pane key="comment" title="评论" disabled> 评论区</a-tab-pane>
+          <a-tab-pane key="comment" title="评论">
+            <PostList :question-id="Number(props.id)" />
+          </a-tab-pane>
           <a-tab-pane key="answer" title="答案">
             <!--
               题解只对作者本人和管理员开放。
@@ -139,6 +141,7 @@ import { computed, onMounted, ref } from "vue";
 import message from "@arco-design/web-vue/es/message";
 import CodeEditor from "@/components/CodeEditor.vue";
 import MdViewer from "@/components/MdViewer.vue";
+import PostList from "@/components/PostList.vue";
 import * as questionApi from "@/api/question";
 import {
   QuestionSubmitAddRequest,

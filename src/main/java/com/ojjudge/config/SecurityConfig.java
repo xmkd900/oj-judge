@@ -58,7 +58,9 @@ public class SecurityConfig {
      */
     private static final String[] PUBLIC_GET_URLS = {
             "/api/question/get/vo",
-            "/api/question/tags"
+            "/api/question/tags",
+            // 题目下的评论，游客也能看（但只有登录的人才能发、才能点赞）
+            "/api/post/list"
     };
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
