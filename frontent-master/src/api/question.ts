@@ -303,10 +303,13 @@ export async function getQuestionSubmitById(
 
 /**
  * 判题结论是否为「通过」。
- * 后端返回的 message 中英文混杂，只认 Accepted 最稳。
+ *
+ * 用 status（2=通过）判断，而不是拿 judgeInfo.message 去比对文案 ——
+ * message 是给用户看的文字，哪天改成「通过啦」判断就失效了。
+ * 数字状态才是稳定的契约。
  */
-export function isAccepted(judgeInfo?: JudgeInfo): boolean {
-  return judgeInfo?.message === "Accepted";
+export function isAccepted(status?: number): boolean {
+  return status === 2;
 }
 
 /**

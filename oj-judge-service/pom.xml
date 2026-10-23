@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  oj-judge-service：判题服务，独立进程。
+
+  职责单一：从消息队列里取判题任务，跑沙箱，把结果发回去。
+
+  ⚠️ 注意这里**没有** mybatis、security、web 的依赖 ——
+  它不连业务数据库，也不对外提供接口。
+  判题需要的一切都由消息带过来（见 JudgeTaskMessage）。
+
+  这正是它能独立扩容的原因：一个无状态的服务，
+  想加几个实例就加几个，挂了也不丢数据（消息还在 RabbitMQ 里）。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com</groupId>
+        <artifactId>oj-judge</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>oj-judge-service</artifactId>
+    <name>oj-judge-service</name>
+    <description>判题服务：消费判题任务，执行沙箱，回传结果</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com</groupId>
+            <artifactId>oj-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!--
+            这里必须带 Web 容器，哪怕这个服务<b>不提供任何业务接口</b>。
+
+            两个原因：
+            1. Nacos 注册要知道"ip:port"，它靠 WebServerInitializedEvent 拿到端口。
+               纯 spring-boot-starter（非 Web）会直接 ClassNotFoundException 起不来。
+            2. 现实中微服务也都要有 Web 容器 —— 就算没有业务接口，
+               也得有 /actuator/health 给注册中心做心跳、给运维探活。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Jackson：消息的序列化 / 反序列化 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jackson</artifactId>
+        </dependency>
+
+        <!-- RabbitMQ：取任务、发结果 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
+        <!-- Nacos 注册中心。只引 discovery，原因见 oj-web/pom.xml 里的说明 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-compile</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

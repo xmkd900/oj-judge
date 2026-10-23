@@ -156,7 +156,8 @@ watchEffect(() => {
  * 不是用户代码错了，不该和用户写错代码用同一个颜色。
  */
 const resultColor = (message?: string, status?: number): string => {
-  if (message === "Accepted") return "green";
+  // 通过与否看数字状态，不比对文案（message 是会改的展示文字）
+  if (status === 2) return "green";
   if (message) return message === "判题服务异常" ? "orange" : "red";
   if (status === 1) return "arcoblue";
   if (status === 3) return "red";

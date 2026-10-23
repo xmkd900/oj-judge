@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  oj-common：两个服务共用的东西。
+
+  只有两类内容放这里：
+    1. 服务之间的消息契约（JudgeTaskMessage / JudgeResultMessage / 队列名常量）
+    2. 两边都要用的枚举（JudgeStatus / LanguageEnum）
+
+  ⚠️ 这里刻意不放任何业务代码，也不放数据库实体 ——
+  否则它就变成了"什么都能往里塞"的垃圾桶模块，
+  最后两个服务又通过它藕断丝连地绑在一起。
+
+  关于包名：为了少改 import，移动过来的类保持原来的包名
+  （com.ojjudge.judge.model.JudgeStatus 等）。Java 允许不同模块有同名包，
+  只要不在同一条 classpath 上撞车就行。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com</groupId>
+        <artifactId>oj-judge</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>oj-common</artifactId>
+    <name>oj-common</name>
+    <description>公共模块：服务间消息契约与共享枚举</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!--
+            Jackson：消息要序列化成 JSON 在 RabbitMQ 里传。
+            刻意不引 Spring Boot 的 jackson starter ——
+            公共模块不该把 Web 容器那些东西拖进来。
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-compile</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

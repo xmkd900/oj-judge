@@ -1,0 +1,101 @@
+server:
+  port: 8121
+
+spring:
+  application:
+    # 注册到 Nacos 时用的名字。判题服务那边是 oj-judge-service。
+    name: oj-web
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/oj?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: 123456
+
+  data:
+    redis:
+      host: 192.168.56.103
+      port: 6379
+      # 刷新令牌、访问令牌黑名单都存在 db0
+      database: 0
+      timeout: 5s
+
+  rabbitmq:
+    host: ${RABBIT_HOST:localhost}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:guest}
+    password: ${RABBIT_PASS:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+
+  cloud:
+    nacos:
+      # 注册地址。
+      # 实测：WSL2 会把容器端口转发到 Windows 的 localhost 上，
+      # 所以这里用 localhost 就能连上（拿 WSL 那个 192.168.x.x 反而连不通）。
+      # 换环境时启动时加 --spring.cloud.nacos.discovery.server-addr=host:8848 覆盖。
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-not-delete-field: isDelete
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# ===== JWT 配置 =====
+jwt:
+  # HMAC 密钥，长度必须 >= 32 字节（256 bit）。生产环境务必替换并通过环境变量注入
+  secret: oj-judge-access-and-refresh-token-signing-secret-key-please-change-me
+  # Access Token 有效期（毫秒）：15 分钟 = 15 * 60 * 1000
+  access-expiration: 900000
+  # Refresh Token 有效期（毫秒）：14 天 = 14 * 24 * 60 * 60 * 1000
+  refresh-expiration: 1209600000
+  # Refresh Token 下发的 Cookie 名称
+  refresh-cookie-name: refresh_token
+  # Cookie 的 Path，必须能覆盖 /api/user/refresh、/api/user/logout
+  refresh-cookie-path: /api/user
+  # 本地 http 调试需为 false；上 https 后改成 true
+  refresh-cookie-secure: false
+
+# ===== CORS 白名单（前端 dev server） =====
+cors:
+  # ⚠️ 这里必须包含前端实际运行的端口，否则浏览器 CORS 预检会被拒，
+  #    表现是「所有接口都失败、页面一片空白」且控制台只有 CORS 报错，极难定位。
+  # 注意：@Value 注入 List<String> 只认**逗号分隔字符串**，
+  # 写成 YAML 列表（- xxx）会导致启动时 Could not resolve placeholder
+  allowed-origins: http://localhost:8080,http://localhost:8081,http://localhost:5173
+
+logging:
+  level:
+    com.ojjudge: info
+
+# ===== 帖子点赞数 =====
+# 展示用的点赞数放在 Redis（post:thumb:{id}），关系表 post_thumb 是最终依据。
+# 下面这个定时任务负责对齐两边：按关系表重新数一遍，修正 Redis 里的偏差。
+# 它是兜底修复，不在主路径上 —— 跑不跑都不影响点赞功能。
+post:
+  thumb-sync:
+    # 两轮之间的间隔（毫秒），默认 1 小时
+    delay-ms: 3600000
+    # 启动后等多久开始第一轮，给应用留点热身时间
+    initial-delay-ms: 60000
+
+judge:
+  # 启动时清理「卡住」的判题记录。
+  # 进程在判题途中被杀/重启时，那些记录会永远停在 status=0（等待中）、
+  # 再也没人管。开启后启动时把它们标记成「判题服务异常」，用户重新提交即可。
+  # ⚠️ 多实例部署时必须关掉 —— 另一个实例可能正在判这些记录。
+  recovery:
+    enabled: true
