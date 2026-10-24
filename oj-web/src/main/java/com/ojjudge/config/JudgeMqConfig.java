@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ojjudge.common.mq.JudgeMqConstants;
 import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.ExchangeBuilder;
 import org.springframework.amqp.core.Queue;
@@ -27,6 +29,25 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 public class JudgeMqConfig {
+
+    /**
+     * 显式声明 RabbitAdmin。
+     *
+     * <p>两个用处：
+     * <ol>
+     *   <li><b>声明队列</b>：它启动时会把下面这些 Queue / Exchange / Binding
+     *       的 @Bean 在 RabbitMQ 上真正建出来（没有它，这些 @Bean 只是内存里的对象）。</li>
+     *   <li><b>查队列状态</b>：过载保护要靠它读队列里堆积了多少条
+     *       （见 JudgeServiceImpl 的 isQueueOverloaded）。</li>
+     * </ol>
+     *
+     * <p>这里必须手动声明：Spring Boot 4 上它不会被自动创建，
+     * 直接 @Autowired RabbitAdmin 会报 No qualifying bean。
+     */
+    @Bean
+    public RabbitAdmin rabbitAdmin(CachingConnectionFactory connectionFactory) {
+        return new RabbitAdmin(connectionFactory);
+    }
 
     /**
      * 消息改用 JSON 序列化。

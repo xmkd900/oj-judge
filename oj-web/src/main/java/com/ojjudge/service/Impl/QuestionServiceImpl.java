@@ -34,6 +34,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Caching;
+import com.ojjudge.ratelimit.RateLimitService;
+import java.time.Duration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -56,11 +59,20 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
 
     private final QuestionTagService questionTagService;
 
+    private final RateLimitService rateLimitService;
+
     private final JsonUtils jsonUtils;
 
     private final QuestionCacheService questionCacheService;
 
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+
+    /**
+     * 每个用户每分钟最多提交几次。
+     * 0 或负数 = 不限流。
+     */
+    @Value("${rate-limit.submit.limit-per-minute:10}")
+    private int submitLimitPerMinute;
 
     // ------------------------------------------------------------ 查询（脱敏）
 
@@ -244,6 +256,15 @@ public class QuestionServiceImpl extends ServiceImpl<QuesionMapper, Question> im
     @CacheEvict(cacheNames = CacheNames.QUESTION, key = "#submitAddDTO.questionId")
     public Long doQuestionSubmit(QuestionSubmitAddDTO submitAddDTO) {
         LoginUserDetails current = SecurityUtils.currentUser();
+
+        // 按用户限流：一次判题要占一个 Docker 容器，不能让一个人把资源刷爆。
+        // 放在最前面 —— 超限就不该再往下查题目、插记录了。
+        if (!rateLimitService.tryAcquire(
+                "submit:user:" + current.getUserId(),
+                submitLimitPerMinute, Duration.ofMinutes(1))) {
+            throw new BusinessException(ErrorCode.RATE_LIMIT_ERROR,
+                    "提交太频繁了，每分钟最多 " + submitLimitPerMinute + " 次，请稍后再试");
+        }
 
         Question question = this.getById(submitAddDTO.getQuestionId());
         if (question == null) {

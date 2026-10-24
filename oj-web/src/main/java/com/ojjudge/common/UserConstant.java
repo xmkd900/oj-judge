@@ -34,7 +34,7 @@ public interface UserConstant {
     /**
      * 密码最小长度
      */
-    int PASSWORD_MIN_LENGTH = 6;
+    int PASSWORD_MIN_LENGTH = 4;
 
     /**
      * 昵称最大长度

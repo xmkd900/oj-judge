@@ -23,7 +23,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -31,6 +33,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Properties;
 import java.util.stream.Stream;
 
 /**
@@ -62,9 +65,18 @@ public class JudgeServiceImpl implements JudgeService {
 
     private final RabbitTemplate rabbitTemplate;
 
+    private final RabbitAdmin rabbitAdmin;
+
     private final JsonUtils jsonUtils;
 
     private final CacheManager cacheManager;
+
+    /**
+     * 待判题队列的堆积上限，超过就拒绝新提交（过载保护）。
+     * 0 或负数 = 不启用这个保护。
+     */
+    @Value("${judge.max-pending-tasks:500}")
+    private int maxPendingTasks;
 
     /**
      * 把判题任务发出去。
@@ -99,6 +111,20 @@ public class JudgeServiceImpl implements JudgeService {
             return;
         }
 
+        // 队列已经堆得很长就别再往里塞了 —— 见 max-pending-tasks 的注释。
+        // 检查放在查完题目之后：能走到这一步说明题目和用例都没问题，
+        // 此时拒绝才是真的因为"忙"，而不是因为参数不合法。
+        if (isQueueOverloaded()) {
+            JudgeInfo judgeInfo = new JudgeInfo();
+            judgeInfo.setMessage("系统繁忙，请稍后再试");
+            judgeInfo.setTime(0L);
+            judgeInfo.setErrorMessage("当前待判题的提交过多（超过 " + maxPendingTasks
+                    + " 条），请稍等一会儿再提交");
+            persist(submit, JudgeStatus.SYSTEM_ERROR, judgeInfo);
+            log.warn("判题队列已满，拒绝本次提交：submitId={}", submit.getId());
+            return;
+        }
+
         JudgeConfig config = jsonUtils.toObject(question.getJudgeConfig(), JudgeConfig.class);
 
         List<String> inputs = new ArrayList<>();
@@ -121,6 +147,28 @@ public class JudgeServiceImpl implements JudgeService {
                 JudgeMqConstants.EXCHANGE, JudgeMqConstants.ROUTING_TASK, task);
         log.info("判题任务已发出：submitId={} language={} 用例数={}",
                 submit.getId(), submit.getLanguage(), inputs.size());
+    }
+
+    /**
+     * 待判题的队列是否已经堆得过长。
+     *
+     * <p>⚠️ 这里刻意"查不到就放行"：限流是为了保护系统，
+     * 不是一道必须拦住的门禁。RabbitAdmin 查不到队列信息时
+     * （比如权限不足、连接抖动），宁可放行让判题正常跑，
+     * 也不能把正常用户的提交挡在外面 —— 那是把保护变成了故障。
+     */
+    private boolean isQueueOverloaded() {
+        if (maxPendingTasks <= 0) {
+            return false;   // 0 或负数 = 不启用这个保护
+        }
+        try {
+            Properties props = rabbitAdmin.getQueueProperties(JudgeMqConstants.QUEUE_TASK);
+            Object count = props == null ? null : props.get(RabbitAdmin.QUEUE_MESSAGE_COUNT);
+            return count instanceof Number number && number.intValue() >= maxPendingTasks;
+        } catch (Exception e) {
+            log.warn("查询判题队列长度失败，本次不限制流", e);
+            return false;
+        }
     }
 
     /**
